@@ -220,6 +220,48 @@
             return root;
         };
 
+        this.start = function () {
+            var controller = window.Lampa.Controller;
+            if (!controller || typeof controller.add !== 'function') return;
+
+            controller.add('content', {
+                toggle: function () {
+                    if (typeof controller.collectionSet === 'function') {
+                        controller.collectionSet(root);
+                    }
+                    if (typeof controller.collectionFocus === 'function') {
+                        controller.collectionFocus(false, root);
+                    }
+                },
+                left: function () {
+                    if (typeof controller.toggle === 'function') controller.toggle('menu');
+                },
+                right: function () {
+                    var navigator = window.Lampa.Navigator || window.Navigator;
+                    if (navigator && typeof navigator.move === 'function') navigator.move('right');
+                },
+                up: function () {
+                    var navigator = window.Lampa.Navigator || window.Navigator;
+                    if (navigator && typeof navigator.move === 'function') navigator.move('up');
+                },
+                down: function () {
+                    var navigator = window.Lampa.Navigator || window.Navigator;
+                    if (navigator && typeof navigator.move === 'function') navigator.move('down');
+                },
+                back: function () {
+                    if (window.Lampa.Activity && typeof window.Lampa.Activity.backward === 'function') {
+                        window.Lampa.Activity.backward();
+                    }
+                }
+            });
+
+            if (typeof controller.toggle === 'function') controller.toggle('content');
+        };
+
+        this.pause = function () {};
+
+        this.stop = function () {};
+
         this.destroy = function () {
             destroyed = true;
             if (request && request.abort) request.abort();
