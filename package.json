@@ -1,0 +1,12 @@
+{
+  "name": "lampa-webdav",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebDAV browser plugin for Lampa on Smart TVs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
