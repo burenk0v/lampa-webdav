@@ -3,37 +3,33 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-test('built plugin registers settings, browser component and menu entry', () => {
-  const registered = { settings: [], params: [], components: {}, menuItems: 0 };
-  const menu = {
-    length: 1,
-    append() { registered.menuItems++; },
-    eq() { return this; }
-  };
-  function jquery() {
+function createJQuery(registered) {
+  return function () {
     return {
       length: 1,
       eq() { return this; },
-      append() { registered.menuItems++; return this; },
+      append() { if (registered) registered.menuItems++; return this; },
       on() { return this; },
       text() { return this; },
       empty() { return this; },
       remove() { return this; }
     };
-  }
+  };
+}
+
+test('built plugin registers its menu and browser without using global SettingsApi', () => {
+  const registered = { components: {}, menuItems: 0 };
   const lampa = {
-    Storage: { field() { return ''; } },
-    SettingsApi: {
-      addComponent(value) { registered.settings.push(value); },
-      addParam(value) { registered.params.push(value); }
-    },
+    Storage: { field() { return ''; }, set() {} },
     Component: {
       get(name) { return registered.components[name]; },
       add(name, component) { registered.components[name] = component; }
     },
     Activity: { push() {} },
+    Input: { show() {} },
     Listener: { follow() {} }
   };
+  const jquery = createJQuery(registered);
   const context = {
     console,
     URL,
@@ -45,34 +41,38 @@ test('built plugin registers settings, browser component and menu entry', () => 
   };
   context.window = context;
   context.Lampa = lampa;
-  context.LampaWebDAVCore = { normalizeBaseUrl: value => value, resolveHref: (base, value) => value };
+  context.LampaWebDAVCore = {
+    normalizeBaseUrl(value) { if (!value) throw new Error('missing'); return value; },
+    resolveHref(base, value) { return value || base; }
+  };
   context.LampaWebDAVClient = { WebDAVClient: function () {} };
   vm.runInNewContext(fs.readFileSync('dist/lampa-webdav.js', 'utf8'), context);
-  assert.equal(registered.settings.length, 1);
-  assert.equal(Object.prototype.hasOwnProperty.call(registered.settings[0], 'after'), false);
-  assert.equal(registered.params.length, 3);
   assert.equal(typeof registered.components.lampa_webdav_browser, 'function');
   assert.equal(registered.menuItems, 1);
+  const component = new registered.components.lampa_webdav_browser({});
+  assert.doesNotThrow(() => component.create());
+  assert.equal(typeof component.render, 'function');
 });
 
 test('built plugin is guarded against duplicate initialization', () => {
-  let settingsCalls = 0;
+  const registered = { components: {}, menuItems: 0 };
   const lampa = {
-    Storage: { field() { return ''; } },
-    SettingsApi: {
-      addComponent() { settingsCalls++; },
-      addParam() {}
+    Storage: { field() { return ''; }, set() {} },
+    Component: {
+      get(name) { return registered.components[name]; },
+      add(name, component) { registered.components[name] = component; }
     },
-    Component: { get() { return true; }, add() {} },
+    Activity: { push() {} },
+    Input: { show() {} },
     Listener: { follow() {} }
   };
-  const jquery = function () {
-    return { length: 1, eq() { return this; }, append() { return this; }, on() { return this; } };
-  };
+  const jquery = createJQuery(registered);
   const context = { URL, window: null, Lampa: lampa, $: jquery, jQuery: jquery, appready: true };
   context.window = context;
   context.Lampa = lampa;
+  context.LampaWebDAVCore = {};
+  context.LampaWebDAVClient = {};
   vm.runInNewContext(fs.readFileSync('dist/lampa-webdav.js', 'utf8'), context);
   vm.runInNewContext(fs.readFileSync('dist/lampa-webdav.js', 'utf8'), context);
-  assert.equal(settingsCalls, 1);
+  assert.equal(registered.menuItems, 1);
 });
