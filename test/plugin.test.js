@@ -63,6 +63,20 @@ test('built plugin registers WebDAV settings, menu and browser through SettingsA
   ]);
   assert.ok(registered.params.every((item) => item.param.type === 'input'));
   assert.ok(registered.params.every((item) => item.param.values === ''), 'input params must initialize Lampa Params values as a string to avoid undefined[key] during settings rendering');
+  assert.equal(typeof registered.params[2].onRender, 'function', 'password field must mask its displayed value');
+  assert.equal(registered.params[0].onRender, undefined);
+  assert.equal(registered.params[1].onRender, undefined);
+  const maskedNode = { textContent: '' };
+  const maskedItem = { find() { return [maskedNode]; } };
+  let mutationCallback;
+  context.MutationObserver = function (callback) {
+    mutationCallback = callback;
+    this.observe = function () {};
+  };
+  registered.params[2].onRender(maskedItem);
+  maskedNode.textContent = 'secret123';
+  mutationCallback();
+  assert.equal(maskedNode.textContent, '*********');
   assert.ok(registered.settings.every((item) => !Object.hasOwn(item, 'after')));
   const component = new registered.components.lampa_webdav_browser({});
   assert.doesNotThrow(() => component.create());
