@@ -4,7 +4,6 @@
 }(typeof window !== 'undefined' ? window : this, function (window, $) {
     'use strict';
 
-    var PLUGIN_ID = 'lampa_webdav';
     var COMPONENT_ID = 'lampa_webdav_browser';
     var KEYS = {
         url: 'lampa_webdav_url',
@@ -14,6 +13,10 @@
 
     function setting(name) {
         return window.Lampa.Storage.field(name) || '';
+    }
+
+    function saveSetting(name, value) {
+        window.Lampa.Storage.set(name, String(value || '').trim());
     }
 
     function credentials() {
@@ -54,8 +57,59 @@
         var currentUrl = object.webdavUrl || '';
 
         function message(text) {
-            var row = $('<div class="lampa-webdav__message"></div>').text(text);
+            root.append($('<div class="lampa-webdav__message"></div>').text(text));
+        }
+
+        function editSetting(key, title, placeholder) {
+            if (!window.Lampa.Input || typeof window.Lampa.Input.show !== 'function') {
+                notify('В этой версии Lampa недоступен ввод текста');
+                return;
+            }
+            window.Lampa.Input.show({
+                title: title,
+                value: setting(key),
+                placeholder: placeholder,
+                onComplite: function (value) {
+                    saveSetting(key, value);
+                    if (key === KEYS.url) currentUrl = '';
+                    notify(title + ': сохранено');
+                },
+                onBack: function () {
+                    if (window.Lampa.Controller && window.Lampa.Controller.toggle) {
+                        window.Lampa.Controller.toggle('content');
+                    }
+                }
+            });
+        }
+
+        function addSettingRow(title, value, key, placeholder) {
+            var row = $('<div class="selector lampa-webdav__item"></div>');
+            row.append($('<div class="lampa-webdav__name"></div>').text(title));
+            row.append($('<div class="lampa-webdav__meta"></div>').text(value || 'Не задано'));
+            row.on('hover:enter', function () {
+                editSetting(key, title, placeholder);
+            });
             root.append(row);
+        }
+
+        function renderSettings() {
+            root.append($('<div class="lampa-webdav__message"></div>').text('Настройки подключения'));
+            addSettingRow('Адрес WebDAV', setting(KEYS.url), KEYS.url, 'https://server.example/webdav/');
+            addSettingRow('Логин', setting(KEYS.username), KEYS.username, 'Логин (необязательно)');
+            addSettingRow('Пароль', setting(KEYS.password) ? '••••••••' : '', KEYS.password, 'Пароль (необязательно)');
+
+            var connect = $('<div class="selector lampa-webdav__item"></div>');
+            connect.append($('<div class="lampa-webdav__name"></div>').text('Открыть каталог / обновить'));
+            connect.on('hover:enter', function () {
+                try {
+                    baseUrl = window.LampaWebDAVCore.normalizeBaseUrl(setting(KEYS.url));
+                    currentUrl = baseUrl;
+                    load();
+                } catch (error) {
+                    notify('Укажите корректный адрес WebDAV');
+                }
+            });
+            root.append(connect);
         }
 
         function openFolder(url, title) {
@@ -98,6 +152,13 @@
 
         function load() {
             var auth = credentials();
+            if (!currentUrl) {
+                root.empty();
+                renderSettings();
+                message('Укажите адрес WebDAV и выберите «Открыть каталог»');
+                return;
+            }
+            if (request && request.abort) request.abort();
             if (self.activity && self.activity.loader) self.activity.loader(true);
             request = new window.LampaWebDAVClient.WebDAVClient().list(
                 currentUrl,
@@ -107,18 +168,13 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        renderSettings();
                         var up = parentUrl(currentUrl, baseUrl);
                         if (up) {
                             var back = $('<div class="selector lampa-webdav__item"></div>');
                             back.append($('<div class="lampa-webdav__name"></div>').text('..  Вверх'));
                             back.on('hover:enter', function () {
-                                window.Lampa.Activity.push({
-                                    url: '',
-                                    title: 'WebDAV',
-                                    component: COMPONENT_ID,
-                                    page: 1,
-                                    webdavUrl: up
-                                });
+                                openFolder(up, 'WebDAV');
                             });
                             root.append(back);
                         }
@@ -132,9 +188,10 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        renderSettings();
                         message(error.message || 'Не удалось открыть WebDAV каталог');
                         if (!error.status) {
-                            message('Если сервер находится на другом домене, проверьте CORS для PROPFIND и заголовка Depth, а также TLS-сертификат.');
+                            message('Проверьте CORS для PROPFIND и заголовка Depth, TLS-сертификат и доступность сервера.');
                         }
                         notify(error.message || 'Ошибка WebDAV');
                     }
@@ -147,15 +204,15 @@
                 message('WebDAV-модули не загружены');
                 return this.render();
             }
+            renderSettings();
             try {
                 baseUrl = window.LampaWebDAVCore.normalizeBaseUrl(setting(KEYS.url));
                 currentUrl = currentUrl || baseUrl;
                 currentUrl = window.LampaWebDAVCore.resolveHref(baseUrl, currentUrl);
+                load();
             } catch (error) {
-                message('Укажите корректный WebDAV URL в Настройки → WebDAV');
-                return this.render();
+                message('Укажите корректный адрес WebDAV выше');
             }
-            load();
             return this.render();
         };
 
@@ -168,30 +225,6 @@
             if (request && request.abort) request.abort();
             root.remove();
         };
-    }
-
-    function registerSettings() {
-        var lampa = window.Lampa;
-        lampa.SettingsApi.addComponent({
-            component: PLUGIN_ID,
-            name: 'WebDAV',
-            icon: '<svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M3 4h7l2 2h9v14H3z"/></svg>',
-        });
-        lampa.SettingsApi.addParam({
-            component: PLUGIN_ID,
-            param: { name: KEYS.url, type: 'input', default: '', placeholder: 'https://server.example/webdav/' },
-            field: { name: 'Адрес WebDAV', description: 'Полный URL каталога WebDAV, например https://host:port/webdav/' }
-        });
-        lampa.SettingsApi.addParam({
-            component: PLUGIN_ID,
-            param: { name: KEYS.username, type: 'input', default: '', placeholder: 'Логин' },
-            field: { name: 'Логин WebDAV' }
-        });
-        lampa.SettingsApi.addParam({
-            component: PLUGIN_ID,
-            param: { name: KEYS.password, type: 'input', default: '', placeholder: 'Пароль' },
-            field: { name: 'Пароль WebDAV', description: 'Внимание: Lampa хранит это значение в локальном хранилище без шифрования. Не используйте пароль от важных аккаунтов.' }
-        });
     }
 
     function registerMenu() {
@@ -216,7 +249,6 @@
     function init() {
         if (window.plugin_lampa_webdav_ready) return;
         window.plugin_lampa_webdav_ready = true;
-        registerSettings();
         registerMenu();
     }
 
