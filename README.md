@@ -24,13 +24,23 @@ The command builds `dist/lampa-webdav.js`, checks its JavaScript syntax, and run
 
 ## Install in Lampa
 
-After the changes are merged into `main`, add this script URL in **Settings → Extensions → Add plugin**:
+The recommended URL (published through GitHub Pages after the Pages deployment workflow completes) is:
+
+```
+https://burenk0v.github.io/lampa-webdav/dist/lampa-webdav.js
+```
+
+The raw GitHub URL remains available as a fallback:
 
 ```
 https://raw.githubusercontent.com/burenk0v/lampa-webdav/main/dist/lampa-webdav.js
 ```
 
 Configure the WebDAV URL in **Settings → WebDAV**. Username and password are optional for directory listing.
+
+## GitHub Pages
+
+Every change to `dist/lampa-webdav.js` on `main` triggers a Pages deployment. The workflow publishes only the distributable plugin and a small landing page; source files and repository metadata are not published.
 
 ## Security and compatibility notes
 
