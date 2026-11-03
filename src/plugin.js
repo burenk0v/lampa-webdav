@@ -176,7 +176,6 @@
             component: PLUGIN_ID,
             name: 'WebDAV',
             icon: '<svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M3 4h7l2 2h9v14H3z"/></svg>',
-            after: 'server'
         });
         lampa.SettingsApi.addParam({
             component: PLUGIN_ID,
