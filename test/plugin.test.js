@@ -49,6 +49,7 @@ test('built plugin registers settings, browser component and menu entry', () => 
   context.LampaWebDAVClient = { WebDAVClient: function () {} };
   vm.runInNewContext(fs.readFileSync('dist/lampa-webdav.js', 'utf8'), context);
   assert.equal(registered.settings.length, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(registered.settings[0], 'after'), false);
   assert.equal(registered.params.length, 3);
   assert.equal(typeof registered.components.lampa_webdav_browser, 'function');
   assert.equal(registered.menuItems, 1);
