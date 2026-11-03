@@ -4,11 +4,12 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 function createJQuery(registered) {
-  return function () {
+  return function (selector) {
+    const isMenu = selector === '.menu .menu__list';
     return {
       length: 1,
       eq() { return this; },
-      append() { if (registered) registered.menuItems++; return this; },
+      append() { if (isMenu && registered) registered.menuItems++; return this; },
       on() { return this; },
       text() { return this; },
       empty() { return this; },
