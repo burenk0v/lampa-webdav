@@ -18,8 +18,8 @@ function createJQuery(registered) {
   };
 }
 
-test('built plugin registers its menu and browser without using global SettingsApi', () => {
-  const registered = { components: {}, menuItems: 0 };
+test('built plugin registers WebDAV settings, menu and browser through SettingsApi', () => {
+  const registered = { components: {}, menuItems: 0, settings: [], params: [] };
   const lampa = {
     Storage: { field() { return ''; }, set() {} },
     Component: {
@@ -27,7 +27,10 @@ test('built plugin registers its menu and browser without using global SettingsA
       add(name, component) { registered.components[name] = component; }
     },
     Activity: { push() {} },
-    Input: { show() {} },
+    SettingsApi: {
+      addComponent(value) { registered.settings.push(value); },
+      addParam(value) { registered.params.push(value); }
+    },
     Listener: { follow() {} }
   };
   const jquery = createJQuery(registered);
@@ -50,6 +53,16 @@ test('built plugin registers its menu and browser without using global SettingsA
   vm.runInNewContext(fs.readFileSync('dist/lampa-webdav.js', 'utf8'), context);
   assert.equal(typeof registered.components.lampa_webdav_browser, 'function');
   assert.equal(registered.menuItems, 1);
+  assert.equal(registered.settings.length, 1);
+  assert.equal(registered.settings[0].component, 'lampa_webdav');
+  assert.equal(registered.params.length, 3);
+  assert.deepEqual(registered.params.map((item) => item.param.name), [
+    'lampa_webdav_url',
+    'lampa_webdav_username',
+    'lampa_webdav_password'
+  ]);
+  assert.ok(registered.params.every((item) => item.param.type === 'input'));
+  assert.ok(registered.settings.every((item) => !Object.hasOwn(item, 'after')));
   const component = new registered.components.lampa_webdav_browser({});
   assert.doesNotThrow(() => component.create());
   assert.equal(typeof component.render, 'function');
@@ -60,7 +73,7 @@ test('built plugin registers its menu and browser without using global SettingsA
 });
 
 test('built plugin is guarded against duplicate initialization', () => {
-  const registered = { components: {}, menuItems: 0 };
+  const registered = { components: {}, menuItems: 0, settings: [], params: [] };
   const lampa = {
     Storage: { field() { return ''; }, set() {} },
     Component: {
@@ -68,7 +81,10 @@ test('built plugin is guarded against duplicate initialization', () => {
       add(name, component) { registered.components[name] = component; }
     },
     Activity: { push() {} },
-    Input: { show() {} },
+    SettingsApi: {
+      addComponent(value) { registered.settings.push(value); },
+      addParam(value) { registered.params.push(value); }
+    },
     Listener: { follow() {} }
   };
   const jquery = createJQuery(registered);
