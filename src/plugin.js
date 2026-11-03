@@ -257,7 +257,7 @@
 
         function mask() {
             var current = value.textContent || '';
-            if (!current || /^\\*+$/.test(current)) return;
+            if (!current || /^\*+$/.test(current)) return;
             value.textContent = new Array(current.length + 1).join('*');
         }
 
