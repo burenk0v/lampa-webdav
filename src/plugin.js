@@ -16,7 +16,7 @@
     }
 
     function saveSetting(name, value) {
-        window.Lampa.Storage.set(name, String(value || '').trim());
+        window.Lampa.Storage.set(name, name === KEYS.password ? String(value || '') : String(value || '').trim());
     }
 
     function credentials() {
