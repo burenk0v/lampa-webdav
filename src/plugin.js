@@ -60,43 +60,8 @@
             root.append($('<div class="lampa-webdav__message"></div>').text(text));
         }
 
-        function editSetting(key, title, placeholder) {
-            if (!window.Lampa.Input || typeof window.Lampa.Input.show !== 'function') {
-                notify('В этой версии Lampa недоступен ввод текста');
-                return;
-            }
-            window.Lampa.Input.show({
-                title: title,
-                value: setting(key),
-                placeholder: placeholder,
-                onComplite: function (value) {
-                    saveSetting(key, value);
-                    if (key === KEYS.url) currentUrl = '';
-                    notify(title + ': сохранено');
-                },
-                onBack: function () {
-                    if (window.Lampa.Controller && window.Lampa.Controller.toggle) {
-                        window.Lampa.Controller.toggle('content');
-                    }
-                }
-            });
-        }
-
-        function addSettingRow(title, value, key, placeholder) {
-            var row = $('<div class="selector lampa-webdav__item"></div>');
-            row.append($('<div class="lampa-webdav__name"></div>').text(title));
-            row.append($('<div class="lampa-webdav__meta"></div>').text(value || 'Не задано'));
-            row.on('hover:enter', function () {
-                editSetting(key, title, placeholder);
-            });
-            root.append(row);
-        }
-
         function renderSettings() {
-            root.append($('<div class="lampa-webdav__message"></div>').text('Настройки подключения'));
-            addSettingRow('Адрес WebDAV', setting(KEYS.url), KEYS.url, 'https://server.example/webdav/');
-            addSettingRow('Логин', setting(KEYS.username), KEYS.username, 'Логин (необязательно)');
-            addSettingRow('Пароль', setting(KEYS.password) ? '••••••••' : '', KEYS.password, 'Пароль (необязательно)');
+            root.append($('<div class="lampa-webdav__message"></div>').text('Параметры подключения находятся в Настройки → WebDAV'));
 
             var connect = $('<div class="selector lampa-webdav__item"></div>');
             connect.append($('<div class="lampa-webdav__name"></div>').text('Открыть каталог / обновить'));
@@ -106,7 +71,7 @@
                     currentUrl = baseUrl;
                     load();
                 } catch (error) {
-                    notify('Укажите корректный адрес WebDAV');
+                    notify('Укажите адрес WebDAV в настройках Lampa');
                 }
             });
             root.append(connect);
@@ -288,9 +253,41 @@
         menu.append(item);
     }
 
+    function registerSettings() {
+        var api = window.Lampa.SettingsApi;
+        if (!api || typeof api.addComponent !== 'function' || typeof api.addParam !== 'function') {
+            notify('Эта сборка Lampa не поддерживает SettingsApi для WebDAV');
+            return;
+        }
+
+        api.addComponent({
+            component: 'lampa_webdav',
+            name: 'WebDAV',
+            icon: '<svg width="44" height="44" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M5 8h34v5H5zm0 11h34v5H5zm0 11h34v5H5z"/></svg>'
+        });
+
+        [
+            { name: KEYS.url, label: 'Адрес WebDAV', placeholder: 'https://server.example/webdav/' },
+            { name: KEYS.username, label: 'Логин', placeholder: 'Необязательно' },
+            { name: KEYS.password, label: 'Пароль', placeholder: 'Необязательно' }
+        ].forEach(function (item) {
+            api.addParam({
+                component: 'lampa_webdav',
+                param: {
+                    name: item.name,
+                    type: 'input',
+                    placeholder: item.placeholder,
+                    default: ''
+                },
+                field: { name: item.label }
+            });
+        });
+    }
+
     function init() {
         if (window.plugin_lampa_webdav_ready) return;
         window.plugin_lampa_webdav_ready = true;
+        registerSettings();
         registerMenu();
     }
 
