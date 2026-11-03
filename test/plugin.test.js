@@ -53,6 +53,10 @@ test('built plugin registers its menu and browser without using global SettingsA
   const component = new registered.components.lampa_webdav_browser({});
   assert.doesNotThrow(() => component.create());
   assert.equal(typeof component.render, 'function');
+  assert.equal(typeof component.start, 'function');
+  assert.equal(typeof component.pause, 'function');
+  assert.equal(typeof component.stop, 'function');
+  assert.doesNotThrow(() => component.start());
 });
 
 test('built plugin is guarded against duplicate initialization', () => {
