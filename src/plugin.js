@@ -15,10 +15,6 @@
         return window.Lampa.Storage.field(name) || '';
     }
 
-    function saveSetting(name, value) {
-        window.Lampa.Storage.set(name, name === KEYS.password ? String(value || '') : String(value || '').trim());
-    }
-
     function credentials() {
         return {
             username: setting(KEYS.username),
