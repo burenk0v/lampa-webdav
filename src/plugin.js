@@ -272,6 +272,7 @@
                 param: {
                     name: item.name,
                     type: 'input',
+                    values: '',
                     placeholder: item.placeholder,
                     default: ''
                 },
