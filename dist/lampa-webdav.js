@@ -443,6 +443,29 @@
         menu.append(item);
     }
 
+    function maskPasswordSetting(item) {
+        if (!window.MutationObserver || !item || typeof item.find !== 'function') return;
+
+        var value = item.find('.settings-param__value')[0];
+        if (!value) return;
+
+        function mask() {
+            var current = value.textContent || '';
+            if (!current || /^\\*+$/.test(current)) return;
+            value.textContent = new Array(current.length + 1).join('*');
+        }
+
+        var observer = new window.MutationObserver(function () {
+            mask();
+        });
+        observer.observe(value, {
+            childList: true,
+            characterData: true,
+            subtree: true
+        });
+        mask();
+    }
+
     function registerSettings() {
         var api = window.Lampa.SettingsApi;
         if (!api || typeof api.addComponent !== 'function' || typeof api.addParam !== 'function') {
@@ -470,7 +493,8 @@
                     placeholder: item.placeholder,
                     default: ''
                 },
-                field: { name: item.label }
+                field: { name: item.label },
+                onRender: item.name === KEYS.password ? maskPasswordSetting : undefined
             });
         });
     }
