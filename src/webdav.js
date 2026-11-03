@@ -6,7 +6,7 @@
 }(typeof window !== 'undefined' ? window : this, function () {
     'use strict';
 
-    var VIDEO_EXTENSIONS = /\\.(avi|mkv|mp4|m4v|mov|wmv|mpg|mpeg|ts|m2ts|webm|ogv)$/i;
+    var VIDEO_EXTENSIONS = /\.(avi|mkv|mp4|m4v|mov|wmv|mpg|mpeg|ts|m2ts|webm|ogv)$/i;
 
     function normalizeBaseUrl(value) {
         var url = new URL(String(value || '').trim());
@@ -18,7 +18,7 @@
         }
         url.hash = '';
         url.search = '';
-        if (!/\\/$/.test(url.pathname)) url.pathname += '/';
+        if (!/\/$/.test(url.pathname)) url.pathname += '/';
         return url.toString();
     }
 
@@ -51,13 +51,13 @@
             var hrefNode = response.getElementsByTagNameNS('*', 'href')[0];
             if (!hrefNode || !hrefNode.textContent) continue;
             var href = resolveHref(requestUrl, hrefNode.textContent.trim());
-            if (href.replace(/\\/$/, '') === requested.toString().replace(/\\/$/, '')) continue;
+            if (href.replace(/\/$/, '') === requested.toString().replace(/\/$/, '')) continue;
 
             var propstats = response.getElementsByTagNameNS('*', 'propstat');
             var prop = null;
             for (var j = 0; j < propstats.length; j++) {
                 var status = propstats[j].getElementsByTagNameNS('*', 'status')[0];
-                if (status && /\\s2\\d\\d\\s/.test(status.textContent)) {
+                if (status && /\s2\d\d\s/.test(status.textContent)) {
                     prop = propstats[j].getElementsByTagNameNS('*', 'prop')[0];
                     break;
                 }
@@ -70,7 +70,7 @@
             var modified = prop.getElementsByTagNameNS('*', 'getlastmodified')[0];
             var name = displayName && displayName.textContent.trim();
             if (!name) {
-                var path = new URL(href).pathname.replace(/\\/$/, '');
+                var path = new URL(href).pathname.replace(/\/$/, '');
                 name = decodeURIComponent(path.substring(path.lastIndexOf('/') + 1));
             }
             items.push({
