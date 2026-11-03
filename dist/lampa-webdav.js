@@ -104,6 +104,7 @@
     };
 }));
 
+
 (function (root, factory) {
     'use strict';
     var api = factory();
@@ -189,6 +190,7 @@
 
     return { WebDAVClient: WebDAVClient, propfindBody: BODY };
 }));
+
 
 (function (window, factory) {
     'use strict';
@@ -464,6 +466,7 @@
                 param: {
                     name: item.name,
                     type: 'input',
+                    values: '',
                     placeholder: item.placeholder,
                     default: ''
                 },
