@@ -237,6 +237,7 @@
     }
 
     function BrowserComponent(object) {
+        object = object || {};
         var self = this;
         var root = $('<div class="lampa-webdav"></div>');
         var request = null;
