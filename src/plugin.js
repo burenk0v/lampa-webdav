@@ -148,6 +148,7 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        debugView = null;
                         renderSettings();
                         message(error.message || 'Не удалось открыть DLNA каталог');
                         if (!error.status) {
