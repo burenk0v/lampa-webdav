@@ -4,11 +4,22 @@
 }(typeof window !== 'undefined' ? window : this, function (window, $) {
     'use strict';
 
-    var COMPONENT_ID = 'lampa_dlna_browser';
-    var KEYS = { address: 'lampa_dlna_address', port: 'lampa_dlna_port' };
+    var COMPONENT_ID = 'lampa_webdav_browser';
+    var KEYS = {
+        url: 'lampa_webdav_url',
+        username: 'lampa_webdav_username',
+        password: 'lampa_webdav_password'
+    };
 
     function setting(name) {
         return window.Lampa.Storage.field(name) || '';
+    }
+
+    function credentials() {
+        return {
+            username: setting(KEYS.username),
+            password: setting(KEYS.password)
+        };
     }
 
     function notify(message) {
@@ -17,80 +28,71 @@
         }
     }
 
+    function parentUrl(currentUrl, rootUrl) {
+        var current = new URL(currentUrl);
+        var root = new URL(rootUrl);
+        var path = current.pathname.replace(/\/$/, '');
+        var rootPath = root.pathname.replace(/\/$/, '');
+        if (current.origin !== root.origin || path === rootPath || path.length <= rootPath.length) return '';
+        var slash = path.lastIndexOf('/');
+        var parentPath = path.substring(0, slash + 1);
+        if (parentPath.length < root.pathname.length) return root.toString();
+        current.pathname = parentPath;
+        current.search = '';
+        current.hash = '';
+        return current.toString();
+    }
+
     function BrowserComponent(object) {
         object = object || {};
         var self = this;
-        var root = $('<div class="lampa-dlna"></div>');
+        var root = $('<div class="lampa-webdav"></div>');
         var request = null;
         var destroyed = false;
-        var currentId = object.dlnaObjectId || '0';
-        var history = object.dlnaHistory || [];
-        var debugEntries = [];
-        var debugView = null;
-
-        function formatLog(entry) {
-            var details;
-            try { details = JSON.stringify(entry.details || {}); } catch (error) { details = String(entry.details || ''); }
-            return entry.time + ' [' + entry.event + '] ' + details;
-        }
-
-        function renderDebug() {
-            if (!debugView) {
-                root.append($('<div class="lampa-dlna__message"></div>').text('Диагностический журнал DLNA (последние 120 событий)'));
-                debugView = $('<pre class="lampa-dlna__debug"></pre>');
-                root.append(debugView);
-            }
-            debugView.text(debugEntries.map(formatLog).join('\n'));
-        }
-
-        function logEntry(entry) {
-            debugEntries.push(entry);
-            if (debugEntries.length > 120) debugEntries.shift();
-            renderDebug();
-        }
+        var baseUrl = '';
+        var currentUrl = object.webdavUrl || '';
 
         function message(text) {
-            root.append($('<div class="lampa-dlna__message"></div>').text(text));
+            root.append($('<div class="lampa-webdav__message"></div>').text(text));
         }
 
         function renderSettings() {
-            root.append($('<div class="lampa-dlna__message"></div>').text('Параметры подключения находятся в Настройки → DLNA'));
+            root.append($('<div class="lampa-webdav__message"></div>').text('Параметры подключения находятся в Настройки → WebDAV'));
 
-            var connect = $('<div class="selector lampa-dlna__item"></div>');
-            connect.append($('<div class="lampa-dlna__name"></div>').text('Открыть каталог / обновить'));
+            var connect = $('<div class="selector lampa-webdav__item"></div>');
+            connect.append($('<div class="lampa-webdav__name"></div>').text('Открыть каталог / обновить'));
             connect.on('hover:enter', function () {
                 try {
-                    window.LampaDLNACore.normalizeAddress(setting(KEYS.address));
-                    window.LampaDLNACore.normalizePort(setting(KEYS.port));
-                    currentId = '0';
-                    history = [];
+                    baseUrl = window.LampaWebDAVCore.normalizeBaseUrl(setting(KEYS.url));
+                    currentUrl = baseUrl;
                     load();
                 } catch (error) {
-                    notify('Укажите адрес и порт DLNA в настройках Lampa');
+                    notify('Укажите адрес WebDAV в настройках Lampa');
                 }
             });
             root.append(connect);
-            debugView = null;
-            renderDebug();
         }
 
-        function openFolder(objectId, title, nextHistory) {
+        function openFolder(url, title) {
             window.Lampa.Activity.push({
                 url: '',
                 title: title,
                 component: COMPONENT_ID,
                 page: 1,
-                dlnaObjectId: objectId,
-                dlnaHistory: nextHistory || []
+                webdavUrl: url
             });
         }
 
         function playFile(item) {
-                        if (!window.Lampa.Player || typeof window.Lampa.Player.play !== 'function') {
+            var auth = credentials();
+            if (auth.username) {
+                notify('Для воспроизведения защищённого WebDAV пока нужна публичная ссылка или доступ без авторизации. Список файлов авторизуется отдельно.');
+                return;
+            }
+            if (!window.Lampa.Player || typeof window.Lampa.Player.play !== 'function') {
                 notify('В этой версии Lampa не найден встроенный плеер');
                 return;
             }
-            logEntry({time:new Date().toISOString(), event:'ЗАПУСК ПЛЕЕРА', details:{url:item.href,title:item.name}});
             window.Lampa.Player.play({
                 url: item.href,
                 title: item.name
@@ -98,43 +100,42 @@
         }
 
         function addItem(item) {
-            var row = $('<div class="selector lampa-dlna__item"></div>');
-            var label = $('<div class="lampa-dlna__name"></div>').text(item.name);
-            var meta = $('<div class="lampa-dlna__meta"></div>').text(item.isDirectory ? 'Папка' : 'Видео');
+            var row = $('<div class="selector lampa-webdav__item"></div>');
+            var label = $('<div class="lampa-webdav__name"></div>').text(item.name);
+            var meta = $('<div class="lampa-webdav__meta"></div>').text(item.isDirectory ? 'Папка' : 'Видео');
             row.append(label).append(meta);
             row.on('hover:enter', function () {
-                if (item.isDirectory) openFolder(item.id, item.name, history.concat([currentId]));
+                if (item.isDirectory) openFolder(item.href, item.name);
                 else playFile(item);
             });
             root.append(row);
         }
 
         function load() {
-            if (!setting(KEYS.address) || !setting(KEYS.port)) {
+            var auth = credentials();
+            if (!currentUrl) {
                 root.empty();
                 renderSettings();
-                message('Укажите адрес DLNA-сервера и порт, затем выберите «Открыть каталог»');
+                message('Укажите адрес WebDAV и выберите «Открыть каталог»');
                 return;
             }
             if (request && request.abort) request.abort();
             if (self.activity && self.activity.loader) self.activity.loader(true);
-            request = new window.LampaDLNAClient.DLNAClient({ onLog: logEntry }).list(
-                setting(KEYS.address),
-                setting(KEYS.port),
-                currentId,
+            request = new window.LampaWebDAVClient.WebDAVClient().list(
+                currentUrl,
+                auth,
                 {
                     success: function (items) {
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
-                        debugView = null;
                         renderSettings();
-                        var up = history.length ? history[history.length - 1] : '';
+                        var up = parentUrl(currentUrl, baseUrl);
                         if (up) {
-                            var back = $('<div class="selector lampa-dlna__item"></div>');
-                            back.append($('<div class="lampa-dlna__name"></div>').text('..  Вверх'));
+                            var back = $('<div class="selector lampa-webdav__item"></div>');
+                            back.append($('<div class="lampa-webdav__name"></div>').text('..  Вверх'));
                             back.on('hover:enter', function () {
-                                openFolder(up, 'DLNA', history.slice(0, -1));
+                                openFolder(up, 'WebDAV');
                             });
                             root.append(back);
                         }
@@ -148,34 +149,30 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
-                        debugView = null;
                         renderSettings();
-                        message(error.message || 'Не удалось открыть DLNA каталог');
+                        message(error.message || 'Не удалось открыть WebDAV каталог');
                         if (!error.status) {
-                            var pageProtocol = window.location && window.location.protocol ? window.location.protocol : 'не определён';
-                            var serverAddress = window.LampaDLNACore.serverUrl(setting(KEYS.address), setting(KEYS.port));
-                            message('Диагностика: страница Lampa открыта по ' + pageProtocol);
-                            message('Адрес DLNA: ' + serverAddress);
-                            message('HTTP 0: подробности доступны в журнале ниже.');
+                            message('Проверьте CORS для PROPFIND и заголовка Depth, TLS-сертификат и доступность сервера.');
                         }
-                        notify(error.message || 'Ошибка DLNA');
+                        notify(error.message || 'Ошибка WebDAV');
                     }
                 }
             );
         }
 
         this.create = function () {
-            if (!window.LampaDLNACore || !window.LampaDLNAClient) {
-                message('DLNA-модули не загружены');
+            if (!window.LampaWebDAVCore || !window.LampaWebDAVClient) {
+                message('WebDAV-модули не загружены');
                 return this.render();
             }
             renderSettings();
             try {
-                window.LampaDLNACore.normalizeAddress(setting(KEYS.address));
-                window.LampaDLNACore.normalizePort(setting(KEYS.port));
+                baseUrl = window.LampaWebDAVCore.normalizeBaseUrl(setting(KEYS.url));
+                currentUrl = currentUrl || baseUrl;
+                currentUrl = window.LampaWebDAVCore.resolveHref(baseUrl, currentUrl);
                 load();
             } catch (error) {
-                message('Укажите корректный адрес DLNA-сервера и порт');
+                message('Укажите корректный адрес WebDAV выше');
             }
             return this.render();
         };
@@ -240,11 +237,11 @@
         }
         var menu = $('.menu .menu__list').eq(0);
         if (!menu.length) return;
-        var item = $('<li class="menu__item selector"><div class="menu__text">DLNA</div></li>');
+        var item = $('<li class="menu__item selector"><div class="menu__text">WebDAV</div></li>');
         item.on('hover:enter', function () {
             window.Lampa.Activity.push({
                 url: '',
-                title: 'DLNA',
+                title: 'WebDAV',
                 component: COMPONENT_ID,
                 page: 1
             });
@@ -252,40 +249,65 @@
         menu.append(item);
     }
 
+    function maskPasswordSetting(item) {
+        if (!window.MutationObserver || !item || typeof item.find !== 'function') return;
+
+        var value = item.find('.settings-param__value')[0];
+        if (!value) return;
+
+        function mask() {
+            var current = value.textContent || '';
+            if (!current || /^\*+$/.test(current)) return;
+            value.textContent = new Array(current.length + 1).join('*');
+        }
+
+        var observer = new window.MutationObserver(function () {
+            mask();
+        });
+        observer.observe(value, {
+            childList: true,
+            characterData: true,
+            subtree: true
+        });
+        mask();
+    }
+
     function registerSettings() {
         var api = window.Lampa.SettingsApi;
         if (!api || typeof api.addComponent !== 'function' || typeof api.addParam !== 'function') {
-            notify('Эта сборка Lampa не поддерживает SettingsApi для DLNA');
+            notify('Эта сборка Lampa не поддерживает SettingsApi для WebDAV');
             return;
         }
 
         api.addComponent({
-            component: 'lampa_dlna',
-            name: 'DLNA',
+            component: 'lampa_webdav',
+            name: 'WebDAV',
             icon: '<svg width="44" height="44" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M5 8h34v5H5zm0 11h34v5H5zm0 11h34v5H5z"/></svg>'
         });
 
         [
-            { name: KEYS.address, label: 'Адрес DLNA-сервера', placeholder: '192.168.1.1' },
-            { name: KEYS.port, label: 'Порт DLNA', placeholder: '8200' }
+            { name: KEYS.url, label: 'Адрес WebDAV', placeholder: 'https://server.example/webdav/' },
+            { name: KEYS.username, label: 'Логин', placeholder: 'Необязательно' },
+            { name: KEYS.password, label: 'Пароль', placeholder: 'Необязательно' }
         ].forEach(function (item) {
             api.addParam({
-                component: 'lampa_dlna',
+                component: 'lampa_webdav',
                 param: {
                     name: item.name,
                     type: 'input',
                     values: '',
                     placeholder: item.placeholder,
-                    default: item.name === KEYS.port ? '8200' : ''
+                    default: ''
                 },
-                field: { name: item.label }
+                field: { name: item.label },
+                onRender: item.name === KEYS.password ? maskPasswordSetting : undefined
             });
         });
     }
 
     function init() {
-        if (window.plugin_lampa_dlna_ready) return;
-        window.plugin_lampa_dlna_ready = true;
+        if (window.plugin_lampa_webdav_ready) return;
+        window.plugin_lampa_webdav_ready = true;
         registerSettings();
         registerMenu();
     }
