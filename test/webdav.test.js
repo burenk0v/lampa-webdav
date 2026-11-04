@@ -2,21 +2,28 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const core = require('../src/webdav.js');
 
-test('normalizes WebDAV base URL', () => {
-  assert.equal(core.normalizeBaseUrl('https://example.test/webdav'), 'https://example.test/webdav/');
+test('normalizes DLNA host and port', () => {
+  assert.equal(core.normalizeAddress('192.168.1.1'), '192.168.1.1');
+  assert.equal(core.normalizeAddress('http://media.local/'), 'media.local');
+  assert.equal(core.normalizePort('8200'), 8200);
+  assert.equal(core.serverUrl('192.168.1.1', 8200), 'http://192.168.1.1:8200/');
 });
 
-test('rejects unsupported protocols and URL credentials', () => {
-  assert.throws(() => core.normalizeBaseUrl('ftp://example.test/dav'));
-  assert.throws(() => core.normalizeBaseUrl('https://user:pass@example.test/dav'));
+test('rejects invalid DLNA address and port', () => {
+  assert.throws(() => core.normalizeAddress(''));
+  assert.throws(() => core.normalizeAddress('192.168.1.1/path'));
+  assert.throws(() => core.normalizePort('0'));
+  assert.throws(() => core.normalizePort('65536'));
+  assert.throws(() => core.normalizePort('abc'));
 });
 
-test('resolves relative hrefs without allowing another origin', () => {
-  assert.equal(core.resolveHref('https://example.test/dav/', 'Movies/'), 'https://example.test/dav/Movies/');
-  assert.throws(() => core.resolveHref('https://example.test/dav/', 'https://attacker.test/file'));
+test('resolves media URLs and recognizes common video formats', () => {
+  assert.equal(core.resolveUrl('http://192.168.1.1:8200/', '/media/Film%20One.MKV'), 'http://192.168.1.1:8200/media/Film%20One.MKV');
+  assert.equal(core.isVideo('http://192.168.1.1/Film%20One.MKV?x=1'), true);
+  assert.equal(core.isVideo('http://192.168.1.1/poster.jpg'), false);
 });
 
-test('recognizes common video extensions and ignores query strings', () => {
-  assert.equal(core.isVideo('https://example.test/Film%20One.MKV?download=1'), true);
-  assert.equal(core.isVideo('https://example.test/poster.jpg'), false);
+test('escapes object identifiers for SOAP XML', () => {
+  assert.equal(core.escapeXml('folder&<1>'), 'folder&amp;&lt;1&gt;');
 });
+
