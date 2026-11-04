@@ -42,6 +42,7 @@
         function fail(stage, message, status) {
             if (completed) return;
             completed = true;
+            log('ОШИБКА', {stage:stage, message:message, status:status || 0});
             if (callbacks.error) callbacks.error({
                 stage: stage,
                 message: stage + ': ' + message,
@@ -118,6 +119,7 @@
                 });
             });
         } catch (error) {
+            log('ОШИБКА ПОДГОТОВКИ', {name:error.name || '', message:error.message || String(error)});
             fail('Подготовка DLNA-запроса', error.message || 'не удалось начать запрос');
         }
         return {
