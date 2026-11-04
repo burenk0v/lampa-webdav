@@ -37,6 +37,7 @@ test('discovers ContentDirectory then sends a SOAP Browse request', () => {
   assert.equal(requests[1].url, 'http://192.168.1.1:8200/ctl/ContentDir');
   assert.match(requests[1].headers.SOAPAction, /#Browse/);
   assert.match(requests[1].body, /<ObjectID>0<\/ObjectID>/);
+  assert.ok(logs.some(entry => entry.event === 'CORS PREFLIGHT ОЖИДАЕТСЯ' && entry.details.method === 'OPTIONS'));
   requests[1].complete(200, '<Envelope/>');
   assert.ok(logs.some(entry => entry.event === 'DIDL РАЗОБРАН' && entry.details.itemCount === 1));
   assert.equal(logs.filter(entry => entry.event === 'HTTP ОТВЕТ').length, 2);
@@ -70,6 +71,25 @@ test('probes root description with a plain fetch GET and logs readable CORS resp
   assert.ok(logs.some(entry => entry.event === 'FETCH GET ОТВЕТ' && entry.details.status === 200));
   assert.ok(logs.some(entry => entry.event === 'FETCH GET ОТВЕТ' && entry.details.headers['access-control-allow-origin'] === '*'));
   assert.ok(logs.some(entry => entry.event === 'FETCH GET ТЕЛО' && entry.details.preview === '<root/>'));
+});
+
+test('logs a fetch GET timeout without blocking the DLNA XHR request', () => {
+  const logs = [];
+  const xhr = createMockRequest();
+  let timeoutCallback;
+  const client = new DLNAClient({
+    createRequest: () => xhr,
+    fetch() { return new Promise(() => {}); },
+    fetchTimeoutMs: 1234,
+    setTimeout(callback, delay) { timeoutCallback = callback; assert.equal(delay, 1234); return 7; },
+    clearTimeout() {},
+    onLog(entry) { logs.push(entry); }
+  });
+
+  client.list('192.168.1.1', '8200', '0', {});
+  assert.equal(xhr.method, 'GET');
+  timeoutCallback();
+  assert.ok(logs.some(entry => entry.event === 'FETCH GET ТАЙМ-АУТ' && entry.details.timeoutMs === 1234));
 });
 
 test('logs a plain fetch GET rejection separately from the DLNA XHR request', async () => {
@@ -122,6 +142,7 @@ test('identifies a browser-blocked SOAP request separately', () => {
   requests[1].onerror();
   assert.equal(failure.status, 0);
   assert.equal(failure.stage, 'SOAP Browse');
+  assert.ok(logs.some(entry => entry.event === 'XHR ERROR' && entry.details.preflightLikely === true));
 });
 
 test('aborts an in-flight discovery request', () => {
