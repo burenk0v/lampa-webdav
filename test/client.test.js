@@ -18,8 +18,10 @@ function createMockRequest() {
 
 test('discovers ContentDirectory then sends a SOAP Browse request', () => {
   const requests = [];
+  const logs = [];
   const client = new DLNAClient({
     createRequest() { const xhr = createMockRequest(); requests.push(xhr); return xhr; },
+    onLog(entry) { logs.push(entry); },
     parseDevice() { return { controlUrl: 'http://192.168.1.1:8200/ctl/ContentDir', serviceType: 'urn:schemas-upnp-org:service:ContentDirectory:1' }; },
     parseBrowse() { return { items: [{ name: 'Film.mkv', isVideo: true }] }; }
   });
@@ -29,12 +31,15 @@ test('discovers ContentDirectory then sends a SOAP Browse request', () => {
   assert.equal(requests[0].method, 'GET');
   assert.equal(requests[0].url, 'http://192.168.1.1:8200/rootDesc.xml');
   requests[0].complete(200, '<root/>');
+  assert.ok(logs.some(entry => entry.event === 'CONTENT DIRECTORY НАЙДЕН'));
   assert.equal(requests.length, 2);
   assert.equal(requests[1].method, 'POST');
   assert.equal(requests[1].url, 'http://192.168.1.1:8200/ctl/ContentDir');
   assert.match(requests[1].headers.SOAPAction, /#Browse/);
   assert.match(requests[1].body, /<ObjectID>0<\/ObjectID>/);
   requests[1].complete(200, '<Envelope/>');
+  assert.ok(logs.some(entry => entry.event === 'DIDL РАЗОБРАН' && entry.details.itemCount === 1));
+  assert.equal(logs.filter(entry => entry.event === 'HTTP ОТВЕТ').length, 2);
   assert.equal(received[0].name, 'Film.mkv');
 });
 
