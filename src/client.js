@@ -21,6 +21,9 @@
         };
         this.onLog = typeof options.onLog === 'function' ? options.onLog : function () {};
         this.fetch = typeof options.fetch === 'function' ? options.fetch : (root && typeof root.fetch === 'function' ? function (url) { return root.fetch(url); } : null);
+        this.fetchTimeoutMs = options.fetchTimeoutMs || 8000;
+        this.setTimeout = options.setTimeout || (root && typeof root.setTimeout === 'function' ? function (callback, delay) { return root.setTimeout(callback, delay); } : setTimeout);
+        this.clearTimeout = options.clearTimeout || (root && typeof root.clearTimeout === 'function' ? function (timer) { return root.clearTimeout(timer); } : clearTimeout);
     }
 
     DLNAClient.prototype.list = function (address, port, objectId, callbacks) {
@@ -46,9 +49,28 @@
                 return;
             }
             var started = Date.now();
-            log('FETCH GET СТАРТ', {method:'GET', url:url, headers:'без дополнительных заголовков'});
+            var settled = false;
+            var timer = null;
+            function clearProbeTimer() {
+                if (timer !== null) {
+                    self.clearTimeout(timer);
+                    timer = null;
+                }
+            }
+            log('FETCH GET СТАРТ', {method:'GET', url:url, headers:'без дополнительных заголовков', timeoutMs:self.fetchTimeoutMs});
+            timer = self.setTimeout(function () {
+                if (settled) return;
+                settled = true;
+                log('FETCH GET ТАЙМ-АУТ', {
+                    url:url,
+                    timeoutMs:self.fetchTimeoutMs,
+                    durationMs:Date.now() - started,
+                    note:'Fetch не завершился за отведённое время; это не доказывает CORS-блокировку.'
+                });
+            }, self.fetchTimeoutMs);
             try {
                 self.fetch(url).then(function (response) {
+                    if (settled) return;
                     var responseHeaders = {};
                     try {
                         if (response.headers && response.headers.forEach) {
@@ -65,9 +87,15 @@
                         headersNote:'Показаны только доступные JavaScript заголовки; Access-Control-Allow-Origin может быть скрыт браузером.'
                     });
                     return response.text().then(function (body) {
+                        if (settled) return;
+                        settled = true;
+                        clearProbeTimer();
                         log('FETCH GET ТЕЛО', {length:body.length, preview:preview(body, 4000)});
                     });
                 }).catch(function (error) {
+                    if (settled) return;
+                    settled = true;
+                    clearProbeTimer();
                     log('FETCH GET ОШИБКА', {
                         name:error && error.name || '',
                         message:error && error.message || String(error),
@@ -76,11 +104,15 @@
                     });
                 });
             } catch (error) {
-                log('FETCH GET ОШИБКА', {
-                    name:error.name || '',
-                    message:error.message || String(error),
-                    durationMs:Date.now() - started
-                });
+                if (!settled) {
+                    settled = true;
+                    clearProbeTimer();
+                    log('FETCH GET ОШИБКА', {
+                        name:error.name || '',
+                        message:error.message || String(error),
+                        durationMs:Date.now() - started
+                    });
+                }
             }
         }
 
@@ -123,7 +155,7 @@
                     catch (error) { log('ОШИБКА ОБРАБОТКИ', {stage:stage, name:error.name || '', message:error.message || String(error)}); fail(stage, error.message || 'не удалось обработать ответ'); }
                 };
                 xhr.onerror = function () {
-                    log('XHR ERROR', {stage:stage, status:xhr.status || 0, durationMs:Date.now()-started, note:'Браузер не предоставил детали ошибки; возможны CORS, preflight или недоступность сервера.'});
+                    log('XHR ERROR', {stage:stage, method:method, url:url, status:xhr.status || 0, durationMs:Date.now()-started, preflightLikely:method === 'POST', note:method === 'POST' ? 'Для SOAP POST браузер может выполнять скрытый CORS OPTIONS preflight из-за Content-Type и SOAPAction; JavaScript не может прочитать его ответ напрямую.' : 'Браузер не предоставил детали ошибки; возможны CORS или недоступность сервера.'});
                     fail(stage, 'браузер не смог прочитать ответ. Возможны CORS, блокировка HTTP/HTTPS или недоступность сервера.');
                 };
                 xhr.ontimeout = function () { log('XHR TIMEOUT', {stage:stage, timeoutMs:xhr.timeout, durationMs:Date.now()-started}); fail(stage, 'истекло время ожидания ответа'); };
@@ -152,6 +184,7 @@
                     '<StartingIndex>0</StartingIndex><RequestedCount>0</RequestedCount><SortCriteria></SortCriteria>' +
                     '</u:Browse></s:Body></s:Envelope>';
                 log('SOAP ПОДГОТОВЛЕН', {action:service.serviceType + '#Browse', controlUrl:service.controlUrl, objectId:objectId || '0', xml:preview(soap,12000)});
+                log('CORS PREFLIGHT ОЖИДАЕТСЯ', {method:'OPTIONS', targetMethod:'POST', controlUrl:service.controlUrl, requestHeaders:['Content-Type: text/xml; charset="utf-8"','SOAPAction'], note:'OPTIONS отправляет браузер автоматически перед SOAP POST. Страница не может напрямую прочитать preflight-ответ; при ошибке POST смотрите XHR ERROR и preflightLikely.'});
                 request('SOAP Browse', 'POST', service.controlUrl, soap, {
                     'Content-Type': 'text/xml; charset="utf-8"',
                     'SOAPAction': '"' + service.serviceType + '#Browse"'
