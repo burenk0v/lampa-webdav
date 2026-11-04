@@ -6,6 +6,10 @@
 }(typeof window !== 'undefined' ? window : this, function (root) {
     'use strict';
 
+    function escapeXml(value) {
+        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&apos;');
+    }
+
     function DLNAClient(options) {
         options = options || {};
         this.createRequest = options.createRequest || function () { return new XMLHttpRequest(); };
@@ -64,7 +68,7 @@
                 var soap = '<?xml version="1.0" encoding="utf-8"?>' +
                     '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
                     '<s:Body><u:Browse xmlns:u="' + service.serviceType + '">' +
-                    '<ObjectID>' + root.LampaDLNACore.escapeXml(objectId || '0') + '</ObjectID>' +
+                    '<ObjectID>' + escapeXml(objectId || '0') + '</ObjectID>' +
                     '<BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>' +
                     '<StartingIndex>0</StartingIndex><RequestedCount>0</RequestedCount><SortCriteria></SortCriteria>' +
                     '</u:Browse></s:Body></s:Envelope>';
