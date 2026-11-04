@@ -369,7 +369,11 @@
                         renderSettings();
                         message(error.message || 'Не удалось открыть DLNA каталог');
                         if (!error.status) {
-                            message('Проверьте, разрешает ли DLNA-сервер запросы из браузера телевизора (CORS).');
+                            var pageProtocol = window.location && window.location.protocol ? window.location.protocol : 'не определён';
+                            var serverAddress = window.LampaDLNACore.serverUrl(setting(KEYS.address), setting(KEYS.port));
+                            message('Диагностика: страница Lampa открыта по ' + pageProtocol);
+                            message('Адрес DLNA: ' + serverAddress);
+                            message('HTTP 0 обычно означает блокировку браузером (CORS или HTTPS → HTTP).');
                         }
                         notify(error.message || 'Ошибка DLNA');
                     }
