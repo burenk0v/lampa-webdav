@@ -152,6 +152,7 @@
             return root.LampaDLNACore.parseBrowseResponse(xml, url);
         };
         this.onLog = typeof options.onLog === 'function' ? options.onLog : function () {};
+        this.fetch = typeof options.fetch === 'function' ? options.fetch : (root && typeof root.fetch === 'function' ? function (url) { return root.fetch(url); } : null);
     }
 
     DLNAClient.prototype.list = function (address, port, objectId, callbacks) {
@@ -169,6 +170,48 @@
         function preview(value, limit) {
             value = String(value == null ? '' : value);
             return value.length > limit ? value.slice(0, limit) + '\n...[обрезано, всего ' + value.length + ' символов]' : value;
+        }
+
+        function probeDescription(url) {
+            if (!self.fetch) {
+                log('FETCH GET НЕДОСТУПЕН', {url:url, reason:'fetch API не поддерживается браузером'});
+                return;
+            }
+            var started = Date.now();
+            log('FETCH GET СТАРТ', {method:'GET', url:url, headers:'без дополнительных заголовков'});
+            try {
+                self.fetch(url).then(function (response) {
+                    var responseHeaders = {};
+                    try {
+                        if (response.headers && response.headers.forEach) {
+                            response.headers.forEach(function (value, name) { responseHeaders[name] = value; });
+                        }
+                    } catch (ignoreHeaders) {}
+                    log('FETCH GET ОТВЕТ', {
+                        status:response.status,
+                        ok:response.ok,
+                        type:response.type || '',
+                        durationMs:Date.now() - started,
+                        headers:responseHeaders
+                    });
+                    return response.text().then(function (body) {
+                        log('FETCH GET ТЕЛО', {length:body.length, preview:preview(body, 4000)});
+                    });
+                }).catch(function (error) {
+                    log('FETCH GET ОШИБКА', {
+                        name:error && error.name || '',
+                        message:error && error.message || String(error),
+                        durationMs:Date.now() - started,
+                        note:'Браузер не дал прочитать ответ; возможна CORS-блокировка или сетевая ошибка.'
+                    });
+                });
+            } catch (error) {
+                log('FETCH GET ОШИБКА', {
+                    name:error.name || '',
+                    message:error.message || String(error),
+                    durationMs:Date.now() - started
+                });
+            }
         }
 
         function fail(stage, message, status) {
@@ -226,6 +269,7 @@
         try {
             baseUrl = 'http://' + String(address).trim() + ':' + String(port).trim() + '/';
             log('СТАРТ DLNA', {pageUrl:root.location ? root.location.href : '', pageProtocol:root.location ? root.location.protocol : '', serverUrl:baseUrl, objectId:objectId || '0', userAgent:root.navigator ? root.navigator.userAgent : ''});
+            probeDescription(baseUrl + 'rootDesc.xml');
             request('Загрузка rootDesc.xml', 'GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
                 log('ROOT DESCRIPTION ПОЛУЧЕН', {length:description.length, xml:preview(description,16000)});
                 service = self.parseDevice(description, baseUrl);
