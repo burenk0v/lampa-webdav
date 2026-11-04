@@ -132,9 +132,11 @@ test('identifies a browser-blocked root description request as stage-specific HT
 
 test('identifies a browser-blocked SOAP request separately', () => {
   const requests = [];
+  const logs = [];
   const client = new DLNAClient({
     createRequest() { const xhr = createMockRequest(); requests.push(xhr); return xhr; },
-    parseDevice() { return { controlUrl: 'http://192.168.1.1:8200/ctl/ContentDir', serviceType: 'urn:schemas-upnp-org:service:ContentDirectory:1' }; }
+    parseDevice() { return { controlUrl: 'http://192.168.1.1:8200/ctl/ContentDir', serviceType: 'urn:schemas-upnp-org:service:ContentDirectory:1' }; },
+    onLog(entry) { logs.push(entry); }
   });
   let failure;
   client.list('192.168.1.1', 8200, '0', { error(error) { failure = error; } });
