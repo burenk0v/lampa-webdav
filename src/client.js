@@ -1,39 +1,29 @@
 (function (root, factory) {
     'use strict';
-    var api = factory();
+    var api = factory(root);
     if (typeof module === 'object' && module.exports) module.exports = api;
-    if (root) root.LampaWebDAVClient = api;
-}(typeof window !== 'undefined' ? window : this, function () {
+    if (root) root.LampaDLNAClient = api;
+}(typeof window !== 'undefined' ? window : this, function (root) {
     'use strict';
 
-    var BODY = '<?xml version="1.0" encoding="utf-8"?>' +
-        '<d:propfind xmlns:d="DAV:"><d:prop>' +
-        '<d:resourcetype/><d:displayname/><d:getcontentlength/><d:getlastmodified/>' +
-        '</d:prop></d:propfind>';
-
-    function encodeCredentials(username, password) {
-        var value = String(username || '') + ':' + String(password || '');
-        var binary = unescape(encodeURIComponent(value));
-        if (typeof btoa === 'function') return 'Basic ' + btoa(binary);
-        if (typeof Buffer !== 'undefined') return 'Basic ' + Buffer.from(value, 'utf8').toString('base64');
-        throw new Error('Base64 encoding is unavailable');
-    }
-
-    function WebDAVClient(options) {
+    function DLNAClient(options) {
         options = options || {};
-        this.createRequest = options.createRequest || function () {
-            return new XMLHttpRequest();
+        this.createRequest = options.createRequest || function () { return new XMLHttpRequest(); };
+        this.parseDevice = options.parseDevice || function (xml, url) {
+            return root.LampaDLNACore.parseDeviceDescription(xml, url);
         };
-        this.parse = options.parse || function (xml, url) {
-            if (!root.LampaWebDAVCore) throw new Error('WebDAV parser is not loaded');
-            return root.LampaWebDAVCore.parseMultistatus(xml, url);
+        this.parseBrowse = options.parseBrowse || function (xml, url) {
+            return root.LampaDLNACore.parseBrowseResponse(xml, url);
         };
     }
 
-    WebDAVClient.prototype.list = function (url, credentials, callbacks) {
+    DLNAClient.prototype.list = function (address, port, objectId, callbacks) {
         callbacks = callbacks || {};
-        var xhr = this.createRequest();
+        var self = this;
         var completed = false;
+        var active = null;
+        var baseUrl;
+        var service;
 
         function fail(message, status) {
             if (completed) return;
@@ -41,45 +31,66 @@
             if (callbacks.error) callbacks.error({ message: message, status: status || 0 });
         }
 
-        try {
-            xhr.open('PROPFIND', url, true);
+        function request(method, url, body, headers, done) {
+            var xhr = self.createRequest();
+            active = xhr;
+            xhr.open(method, url, true);
             xhr.timeout = 20000;
-            xhr.setRequestHeader('Depth', '1');
-            xhr.setRequestHeader('Content-Type', 'application/xml; charset=utf-8');
-            if (credentials && credentials.username) {
-                xhr.setRequestHeader('Authorization', encodeCredentials(credentials.username, credentials.password));
-            }
+            Object.keys(headers || {}).forEach(function (name) {
+                xhr.setRequestHeader(name, headers[name]);
+            });
             xhr.onreadystatechange = function () {
                 if (xhr.readyState !== 4 || completed) return;
-                if (xhr.status !== 207) {
-                    fail(xhr.status ? 'WebDAV server returned HTTP ' + xhr.status : 'WebDAV request failed. Check CORS, TLS certificate and network access.', xhr.status);
+                if (xhr.status < 200 || xhr.status >= 300) {
+                    fail('DLNA-сервер вернул HTTP ' + xhr.status, xhr.status);
                     return;
                 }
+                done(xhr.responseText);
+            };
+            xhr.onerror = function () { fail('Не удалось подключиться к DLNA-серверу. Проверьте адрес, порт и доступность сервера.'); };
+            xhr.ontimeout = function () { fail('Истекло время ожидания ответа DLNA-сервера'); };
+            xhr.send(body || null);
+        }
+
+        try {
+            baseUrl = root.LampaDLNACore.serverUrl(address, port);
+            request('GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
                 try {
-                    var items = this.parse(xhr.responseText, url);
-                    completed = true;
-                    if (callbacks.success) callbacks.success(items);
+                    service = self.parseDevice(description, baseUrl);
                 } catch (error) {
-                    fail(error.message || 'Could not parse WebDAV response', xhr.status);
+                    fail(error.message);
+                    return;
                 }
-            }.bind(this);
-            xhr.onerror = function () {
-                fail('Network error. The TV browser may have blocked the WebDAV request because of CORS or TLS.');
-            };
-            xhr.ontimeout = function () {
-                fail('WebDAV request timed out');
-            };
-            xhr.send(BODY);
+                var soap = '<?xml version="1.0" encoding="utf-8"?>' +
+                    '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
+                    '<s:Body><u:Browse xmlns:u="' + service.serviceType + '">' +
+                    '<ObjectID>' + root.LampaDLNACore.escapeXml(objectId || '0') + '</ObjectID>' +
+                    '<BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>' +
+                    '<StartingIndex>0</StartingIndex><RequestedCount>0</RequestedCount><SortCriteria></SortCriteria>' +
+                    '</u:Browse></s:Body></s:Envelope>';
+                request('POST', service.controlUrl, soap, {
+                    'Content-Type': 'text/xml; charset="utf-8"',
+                    'SOAPAction': '"' + service.serviceType + '#Browse"'
+                }, function (response) {
+                    try {
+                        var result = self.parseBrowse(response, baseUrl);
+                        completed = true;
+                        if (callbacks.success) callbacks.success(result.items);
+                    } catch (error) {
+                        fail(error.message);
+                    }
+                });
+            });
         } catch (error) {
-            fail(error.message || 'Could not start WebDAV request');
+            fail(error.message || 'Не удалось начать DLNA-запрос');
         }
         return {
             abort: function () {
-                if (!completed && xhr.abort) xhr.abort();
+                if (!completed && active && active.abort) active.abort();
                 completed = true;
             }
         };
     };
 
-    return { WebDAVClient: WebDAVClient, propfindBody: BODY };
+    return { DLNAClient: DLNAClient };
 }));
