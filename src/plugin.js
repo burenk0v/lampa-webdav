@@ -25,7 +25,29 @@
         var destroyed = false;
         var currentId = object.dlnaObjectId || '0';
         var history = object.dlnaHistory || [];
-        var currentParentId = object.dlnaParentId || '';
+        var debugEntries = [];
+        var debugView = null;
+
+        function formatLog(entry) {
+            var details;
+            try { details = JSON.stringify(entry.details || {}); } catch (error) { details = String(entry.details || ''); }
+            return entry.time + ' [' + entry.event + '] ' + details;
+        }
+
+        function renderDebug() {
+            if (!debugView) {
+                root.append($('<div class="lampa-dlna__message"></div>').text('Диагностический журнал DLNA (последние 120 событий)'));
+                debugView = $('<pre class="lampa-dlna__debug"></pre>');
+                root.append(debugView);
+            }
+            debugView.text(debugEntries.map(formatLog).join('\n'));
+        }
+
+        function logEntry(entry) {
+            debugEntries.push(entry);
+            if (debugEntries.length > 120) debugEntries.shift();
+            renderDebug();
+        }
 
         function message(text) {
             root.append($('<div class="lampa-dlna__message"></div>').text(text));
@@ -48,6 +70,8 @@
                 }
             });
             root.append(connect);
+            debugView = null;
+            renderDebug();
         }
 
         function openFolder(objectId, title, nextHistory) {
@@ -66,6 +90,7 @@
                 notify('В этой версии Lampa не найден встроенный плеер');
                 return;
             }
+            logEntry({time:new Date().toISOString(), event:'ЗАПУСК ПЛЕЕРА', details:{url:item.href,title:item.name}});
             window.Lampa.Player.play({
                 url: item.href,
                 title: item.name
@@ -93,7 +118,7 @@
             }
             if (request && request.abort) request.abort();
             if (self.activity && self.activity.loader) self.activity.loader(true);
-            request = new window.LampaDLNAClient.DLNAClient().list(
+            request = new window.LampaDLNAClient.DLNAClient({ onLog: logEntry }).list(
                 setting(KEYS.address),
                 setting(KEYS.port),
                 currentId,
@@ -102,6 +127,7 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        debugView = null;
                         renderSettings();
                         var up = history.length ? history[history.length - 1] : '';
                         if (up) {
@@ -122,6 +148,7 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        debugView = null;
                         renderSettings();
                         message(error.message || 'Не удалось открыть DLNA каталог');
                         if (!error.status) {
@@ -129,7 +156,7 @@
                             var serverAddress = window.LampaDLNACore.serverUrl(setting(KEYS.address), setting(KEYS.port));
                             message('Диагностика: страница Lampa открыта по ' + pageProtocol);
                             message('Адрес DLNA: ' + serverAddress);
-                            message('HTTP 0 обычно означает блокировку браузером (CORS или HTTPS → HTTP).');
+                            message('HTTP 0: подробности доступны в журнале ниже.');
                         }
                         notify(error.message || 'Ошибка DLNA');
                     }

@@ -151,6 +151,7 @@
         this.parseBrowse = options.parseBrowse || function (xml, url) {
             return root.LampaDLNACore.parseBrowseResponse(xml, url);
         };
+        this.onLog = typeof options.onLog === 'function' ? options.onLog : function () {};
     }
 
     DLNAClient.prototype.list = function (address, port, objectId, callbacks) {
@@ -161,9 +162,19 @@
         var baseUrl;
         var service;
 
+        function log(event, details) {
+            try { self.onLog({time:new Date().toISOString(), event:event, details:details || {}}); } catch (ignore) {}
+        }
+
+        function preview(value, limit) {
+            value = String(value == null ? '' : value);
+            return value.length > limit ? value.slice(0, limit) + '\n...[обрезано, всего ' + value.length + ' символов]' : value;
+        }
+
         function fail(stage, message, status) {
             if (completed) return;
             completed = true;
+            log('ОШИБКА', {stage:stage, message:message, status:status || 0});
             if (callbacks.error) callbacks.error({
                 stage: stage,
                 message: stage + ': ' + message,
@@ -173,44 +184,52 @@
 
         function request(stage, method, url, body, headers, done) {
             var xhr = self.createRequest();
+            var started = Date.now();
+            var seen = {};
             active = xhr;
+            log('ПОДГОТОВКА ЗАПРОСА', {stage:stage, method:method, url:url, headers:headers || {}, body:body ? preview(body, 12000) : null});
             try {
                 xhr.open(method, url, true);
+                log('XHR OPEN', {stage:stage, method:method, url:url});
                 xhr.timeout = 20000;
                 Object.keys(headers || {}).forEach(function (name) {
                     xhr.setRequestHeader(name, headers[name]);
+                    log('ЗАГОЛОВОК ЗАПРОСА', {stage:stage, name:name, value:headers[name]});
                 });
                 xhr.onreadystatechange = function () {
+                    if (seen[xhr.readyState]) return;
+                    seen[xhr.readyState] = true;
+                    log('XHR READY STATE', {stage:stage, readyState:xhr.readyState, status:xhr.status || 0});
                     if (xhr.readyState !== 4 || completed) return;
-                    if (xhr.status < 200 || xhr.status >= 300) {
-                        fail(stage, 'сервер вернул HTTP ' + xhr.status, xhr.status);
-                        return;
-                    }
-                    try {
-                        done(xhr.responseText);
-                    } catch (error) {
-                        fail(stage, error.message || 'не удалось обработать ответ');
-                    }
+                    var text = '', responseHeaders = '';
+                    try { text = xhr.responseText || ''; } catch (ignoreText) {}
+                    try { responseHeaders = xhr.getAllResponseHeaders ? xhr.getAllResponseHeaders() : ''; } catch (ignoreHeaders) {}
+                    log('HTTP ОТВЕТ', {stage:stage, status:xhr.status || 0, statusText:xhr.statusText || '', durationMs:Date.now()-started, responseHeaders:responseHeaders || '(недоступны или пусты)', responseText:preview(text,16000)});
+                    if (xhr.status < 200 || xhr.status >= 300) { fail(stage, 'сервер вернул HTTP ' + xhr.status, xhr.status); return; }
+                    try { log('ОБРАБОТКА ОТВЕТА', {stage:stage, responseLength:text.length}); done(text); }
+                    catch (error) { log('ОШИБКА ОБРАБОТКИ', {stage:stage, name:error.name || '', message:error.message || String(error)}); fail(stage, error.message || 'не удалось обработать ответ'); }
                 };
                 xhr.onerror = function () {
+                    log('XHR ERROR', {stage:stage, status:xhr.status || 0, durationMs:Date.now()-started, note:'Браузер не предоставил детали ошибки; возможны CORS, preflight или недоступность сервера.'});
                     fail(stage, 'браузер не смог прочитать ответ. Возможны CORS, блокировка HTTP/HTTPS или недоступность сервера.');
                 };
-                xhr.ontimeout = function () {
-                    fail(stage, 'истекло время ожидания ответа');
-                };
-                xhr.onabort = function () {
-                    if (!completed) fail(stage, 'запрос был прерван');
-                };
+                xhr.ontimeout = function () { log('XHR TIMEOUT', {stage:stage, timeoutMs:xhr.timeout, durationMs:Date.now()-started}); fail(stage, 'истекло время ожидания ответа'); };
+                xhr.onabort = function () { log('XHR ABORT', {stage:stage}); if (!completed) fail(stage, 'запрос был прерван'); };
+                log('XHR SEND', {stage:stage, bodyLength:body ? body.length : 0});
                 xhr.send(body || null);
             } catch (error) {
+                log('ИСКЛЮЧЕНИЕ XHR', {stage:stage, name:error.name || '', message:error.message || String(error)});
                 fail(stage, error.message || 'не удалось отправить запрос');
             }
         }
 
         try {
             baseUrl = 'http://' + String(address).trim() + ':' + String(port).trim() + '/';
+            log('СТАРТ DLNA', {pageUrl:root.location ? root.location.href : '', pageProtocol:root.location ? root.location.protocol : '', serverUrl:baseUrl, objectId:objectId || '0', userAgent:root.navigator ? root.navigator.userAgent : ''});
             request('Загрузка rootDesc.xml', 'GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
+                log('ROOT DESCRIPTION ПОЛУЧЕН', {length:description.length, xml:preview(description,16000)});
                 service = self.parseDevice(description, baseUrl);
+                log('CONTENT DIRECTORY НАЙДЕН', {serviceType:service.serviceType, controlUrl:service.controlUrl});
                 var soap = '<?xml version="1.0" encoding="utf-8"?>' +
                     '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
                     '<s:Body><u:Browse xmlns:u="' + service.serviceType + '">' +
@@ -218,16 +237,21 @@
                     '<BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>' +
                     '<StartingIndex>0</StartingIndex><RequestedCount>0</RequestedCount><SortCriteria></SortCriteria>' +
                     '</u:Browse></s:Body></s:Envelope>';
+                log('SOAP ПОДГОТОВЛЕН', {action:service.serviceType + '#Browse', controlUrl:service.controlUrl, objectId:objectId || '0', xml:preview(soap,12000)});
                 request('SOAP Browse', 'POST', service.controlUrl, soap, {
                     'Content-Type': 'text/xml; charset="utf-8"',
                     'SOAPAction': '"' + service.serviceType + '#Browse"'
                 }, function (response) {
+                    log('SOAP ОТВЕТ ПОЛУЧЕН', {length:response.length, xml:preview(response,16000)});
                     var result = self.parseBrowse(response, baseUrl);
+                    log('DIDL РАЗОБРАН', {itemCount:result.items.length, numberReturned:result.numberReturned, items:result.items.map(function (item) { return {id:item.id,name:item.name,isDirectory:item.isDirectory,isVideo:item.isVideo,href:item.href,size:item.size}; })});
                     completed = true;
+                    log('DLNA ЗАВЕРШЕНО', {itemCount:result.items.length});
                     if (callbacks.success) callbacks.success(result.items);
                 });
             });
         } catch (error) {
+            log('ОШИБКА ПОДГОТОВКИ', {name:error.name || '', message:error.message || String(error)});
             fail('Подготовка DLNA-запроса', error.message || 'не удалось начать запрос');
         }
         return {
@@ -269,7 +293,29 @@
         var destroyed = false;
         var currentId = object.dlnaObjectId || '0';
         var history = object.dlnaHistory || [];
-        var currentParentId = object.dlnaParentId || '';
+        var debugEntries = [];
+        var debugView = null;
+
+        function formatLog(entry) {
+            var details;
+            try { details = JSON.stringify(entry.details || {}); } catch (error) { details = String(entry.details || ''); }
+            return entry.time + ' [' + entry.event + '] ' + details;
+        }
+
+        function renderDebug() {
+            if (!debugView) {
+                root.append($('<div class="lampa-dlna__message"></div>').text('Диагностический журнал DLNA (последние 120 событий)'));
+                debugView = $('<pre class="lampa-dlna__debug"></pre>');
+                root.append(debugView);
+            }
+            debugView.text(debugEntries.map(formatLog).join('\n'));
+        }
+
+        function logEntry(entry) {
+            debugEntries.push(entry);
+            if (debugEntries.length > 120) debugEntries.shift();
+            renderDebug();
+        }
 
         function message(text) {
             root.append($('<div class="lampa-dlna__message"></div>').text(text));
@@ -292,6 +338,8 @@
                 }
             });
             root.append(connect);
+            debugView = null;
+            renderDebug();
         }
 
         function openFolder(objectId, title, nextHistory) {
@@ -310,6 +358,7 @@
                 notify('В этой версии Lampa не найден встроенный плеер');
                 return;
             }
+            logEntry({time:new Date().toISOString(), event:'ЗАПУСК ПЛЕЕРА', details:{url:item.href,title:item.name}});
             window.Lampa.Player.play({
                 url: item.href,
                 title: item.name
@@ -337,7 +386,7 @@
             }
             if (request && request.abort) request.abort();
             if (self.activity && self.activity.loader) self.activity.loader(true);
-            request = new window.LampaDLNAClient.DLNAClient().list(
+            request = new window.LampaDLNAClient.DLNAClient({ onLog: logEntry }).list(
                 setting(KEYS.address),
                 setting(KEYS.port),
                 currentId,
@@ -346,6 +395,7 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        debugView = null;
                         renderSettings();
                         var up = history.length ? history[history.length - 1] : '';
                         if (up) {
@@ -366,6 +416,7 @@
                         if (destroyed) return;
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
+                        debugView = null;
                         renderSettings();
                         message(error.message || 'Не удалось открыть DLNA каталог');
                         if (!error.status) {
@@ -373,7 +424,7 @@
                             var serverAddress = window.LampaDLNACore.serverUrl(setting(KEYS.address), setting(KEYS.port));
                             message('Диагностика: страница Lampa открыта по ' + pageProtocol);
                             message('Адрес DLNA: ' + serverAddress);
-                            message('HTTP 0 обычно означает блокировку браузером (CORS или HTTPS → HTTP).');
+                            message('HTTP 0: подробности доступны в журнале ниже.');
                         }
                         notify(error.message || 'Ошибка DLNA');
                     }
