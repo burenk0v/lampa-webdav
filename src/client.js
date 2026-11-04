@@ -53,7 +53,7 @@
         }
 
         try {
-            baseUrl = root.LampaDLNACore.serverUrl(address, port);
+            baseUrl = 'http://' + String(address).trim() + ':' + String(port).trim() + '/';
             request('GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
                 try {
                     service = self.parseDevice(description, baseUrl);
