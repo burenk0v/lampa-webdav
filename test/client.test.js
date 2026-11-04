@@ -38,14 +38,40 @@ test('discovers ContentDirectory then sends a SOAP Browse request', () => {
   assert.equal(received[0].name, 'Film.mkv');
 });
 
-test('reports HTTP failures once', () => {
+test('reports HTTP failures with the failing request stage', () => {
   const xhr = createMockRequest();
   const client = new DLNAClient({ createRequest: () => xhr });
   let failure;
   client.list('192.168.1.1', 8200, '0', { error(error) { failure = error; } });
   xhr.complete(403);
   assert.equal(failure.status, 403);
+  assert.equal(failure.stage, 'Загрузка rootDesc.xml');
   assert.match(failure.message, /HTTP 403/);
+});
+
+test('identifies a browser-blocked root description request as stage-specific HTTP 0', () => {
+  const xhr = createMockRequest();
+  const client = new DLNAClient({ createRequest: () => xhr });
+  let failure;
+  client.list('192.168.1.1', 8200, '0', { error(error) { failure = error; } });
+  xhr.onerror();
+  assert.equal(failure.status, 0);
+  assert.equal(failure.stage, 'Загрузка rootDesc.xml');
+  assert.match(failure.message, /CORS/);
+});
+
+test('identifies a browser-blocked SOAP request separately', () => {
+  const requests = [];
+  const client = new DLNAClient({
+    createRequest() { const xhr = createMockRequest(); requests.push(xhr); return xhr; },
+    parseDevice() { return { controlUrl: 'http://192.168.1.1:8200/ctl/ContentDir', serviceType: 'urn:schemas-upnp-org:service:ContentDirectory:1' }; }
+  });
+  let failure;
+  client.list('192.168.1.1', 8200, '0', { error(error) { failure = error; } });
+  requests[0].complete(200, '<root/>');
+  requests[1].onerror();
+  assert.equal(failure.status, 0);
+  assert.equal(failure.stage, 'SOAP Browse');
 });
 
 test('aborts an in-flight discovery request', () => {

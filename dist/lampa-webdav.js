@@ -139,7 +139,7 @@
     'use strict';
 
     function escapeXml(value) {
-        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&apos;');
+        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
     }
 
     function DLNAClient(options) {
@@ -161,42 +161,56 @@
         var baseUrl;
         var service;
 
-        function fail(message, status) {
+        function fail(stage, message, status) {
             if (completed) return;
             completed = true;
-            if (callbacks.error) callbacks.error({ message: message, status: status || 0 });
+            if (callbacks.error) callbacks.error({
+                stage: stage,
+                message: stage + ': ' + message,
+                status: status || 0
+            });
         }
 
-        function request(method, url, body, headers, done) {
+        function request(stage, method, url, body, headers, done) {
             var xhr = self.createRequest();
             active = xhr;
-            xhr.open(method, url, true);
-            xhr.timeout = 20000;
-            Object.keys(headers || {}).forEach(function (name) {
-                xhr.setRequestHeader(name, headers[name]);
-            });
-            xhr.onreadystatechange = function () {
-                if (xhr.readyState !== 4 || completed) return;
-                if (xhr.status < 200 || xhr.status >= 300) {
-                    fail('DLNA-сервер вернул HTTP ' + xhr.status, xhr.status);
-                    return;
-                }
-                done(xhr.responseText);
-            };
-            xhr.onerror = function () { fail('Не удалось подключиться к DLNA-серверу. Проверьте адрес, порт и доступность сервера.'); };
-            xhr.ontimeout = function () { fail('Истекло время ожидания ответа DLNA-сервера'); };
-            xhr.send(body || null);
+            try {
+                xhr.open(method, url, true);
+                xhr.timeout = 20000;
+                Object.keys(headers || {}).forEach(function (name) {
+                    xhr.setRequestHeader(name, headers[name]);
+                });
+                xhr.onreadystatechange = function () {
+                    if (xhr.readyState !== 4 || completed) return;
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        fail(stage, 'сервер вернул HTTP ' + xhr.status, xhr.status);
+                        return;
+                    }
+                    try {
+                        done(xhr.responseText);
+                    } catch (error) {
+                        fail(stage, error.message || 'не удалось обработать ответ');
+                    }
+                };
+                xhr.onerror = function () {
+                    fail(stage, 'браузер не смог прочитать ответ. Возможны CORS, блокировка HTTP/HTTPS или недоступность сервера.');
+                };
+                xhr.ontimeout = function () {
+                    fail(stage, 'истекло время ожидания ответа');
+                };
+                xhr.onabort = function () {
+                    if (!completed) fail(stage, 'запрос был прерван');
+                };
+                xhr.send(body || null);
+            } catch (error) {
+                fail(stage, error.message || 'не удалось отправить запрос');
+            }
         }
 
         try {
             baseUrl = 'http://' + String(address).trim() + ':' + String(port).trim() + '/';
-            request('GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
-                try {
-                    service = self.parseDevice(description, baseUrl);
-                } catch (error) {
-                    fail(error.message);
-                    return;
-                }
+            request('Загрузка rootDesc.xml', 'GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
+                service = self.parseDevice(description, baseUrl);
                 var soap = '<?xml version="1.0" encoding="utf-8"?>' +
                     '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
                     '<s:Body><u:Browse xmlns:u="' + service.serviceType + '">' +
@@ -204,26 +218,23 @@
                     '<BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>' +
                     '<StartingIndex>0</StartingIndex><RequestedCount>0</RequestedCount><SortCriteria></SortCriteria>' +
                     '</u:Browse></s:Body></s:Envelope>';
-                request('POST', service.controlUrl, soap, {
+                request('SOAP Browse', 'POST', service.controlUrl, soap, {
                     'Content-Type': 'text/xml; charset="utf-8"',
                     'SOAPAction': '"' + service.serviceType + '#Browse"'
                 }, function (response) {
-                    try {
-                        var result = self.parseBrowse(response, baseUrl);
-                        completed = true;
-                        if (callbacks.success) callbacks.success(result.items);
-                    } catch (error) {
-                        fail(error.message);
-                    }
+                    var result = self.parseBrowse(response, baseUrl);
+                    completed = true;
+                    if (callbacks.success) callbacks.success(result.items);
                 });
             });
         } catch (error) {
-            fail(error.message || 'Не удалось начать DLNA-запрос');
+            fail('Подготовка DLNA-запроса', error.message || 'не удалось начать запрос');
         }
         return {
             abort: function () {
-                if (!completed && active && active.abort) active.abort();
+                if (completed) return;
                 completed = true;
+                if (active && active.abort) active.abort();
             }
         };
     };
