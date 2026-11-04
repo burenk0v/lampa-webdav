@@ -43,6 +43,51 @@ test('discovers ContentDirectory then sends a SOAP Browse request', () => {
   assert.equal(received[0].name, 'Film.mkv');
 });
 
+test('probes root description with a plain fetch GET and logs readable CORS response details', async () => {
+  const logs = [];
+  const xhr = createMockRequest();
+  const fetchCalls = [];
+  const client = new DLNAClient({
+    createRequest: () => xhr,
+    fetch(url) {
+      fetchCalls.push(arguments.length === 1 ? url : 'unexpected-options');
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        type: 'cors',
+        headers: { forEach(callback) { callback('*', 'access-control-allow-origin'); } },
+        text() { return Promise.resolve('<root/>'); }
+      });
+    },
+    onLog(entry) { logs.push(entry); }
+  });
+
+  client.list('192.168.1.1', '8200', '0', {});
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.deepEqual(fetchCalls, ['http://192.168.1.1:8200/rootDesc.xml']);
+  assert.ok(logs.some(entry => entry.event === 'FETCH GET СТАРТ' && entry.details.headers === 'без дополнительных заголовков'));
+  assert.ok(logs.some(entry => entry.event === 'FETCH GET ОТВЕТ' && entry.details.status === 200));
+  assert.ok(logs.some(entry => entry.event === 'FETCH GET ОТВЕТ' && entry.details.headers['access-control-allow-origin'] === '*'));
+  assert.ok(logs.some(entry => entry.event === 'FETCH GET ТЕЛО' && entry.details.preview === '<root/>'));
+});
+
+test('logs a plain fetch GET rejection separately from the DLNA XHR request', async () => {
+  const logs = [];
+  const xhr = createMockRequest();
+  const client = new DLNAClient({
+    createRequest: () => xhr,
+    fetch() { return Promise.reject(new TypeError('Failed to fetch')); },
+    onLog(entry) { logs.push(entry); }
+  });
+
+  client.list('192.168.1.1', '8200', '0', {});
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.ok(logs.some(entry => entry.event === 'FETCH GET ОШИБКА' && entry.details.name === 'TypeError'));
+  assert.equal(xhr.method, 'GET');
+});
+
 test('reports HTTP failures with the failing request stage', () => {
   const xhr = createMockRequest();
   const client = new DLNAClient({ createRequest: () => xhr });
