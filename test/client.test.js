@@ -1,84 +1,57 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { WebDAVClient, propfindBody } = require('../src/client.js');
+const { DLNAClient } = require('../src/client.js');
 
 function createMockRequest() {
   return {
-    headers: {},
-    readyState: 0,
-    status: 0,
-    responseText: '',
+    headers: {}, readyState: 0, status: 0, responseText: '',
     open(method, url, async) { this.method = method; this.url = url; this.async = async; },
     setRequestHeader(name, value) { this.headers[name] = value; },
     send(body) { this.body = body; },
     abort() { this.aborted = true; },
     complete(status, responseText) {
-      this.status = status;
-      this.responseText = responseText || '';
-      this.readyState = 4;
-      this.onreadystatechange();
+      this.status = status; this.responseText = responseText || '';
+      this.readyState = 4; this.onreadystatechange();
     }
   };
 }
 
-test('sends a depth-one WebDAV PROPFIND request', () => {
-  const xhr = createMockRequest();
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
-  client.list('https://example.test/webdav/', {}, {});
-  assert.equal(xhr.method, 'PROPFIND');
-  assert.equal(xhr.url, 'https://example.test/webdav/');
-  assert.equal(xhr.async, true);
-  assert.equal(xhr.headers.Depth, '1');
-  assert.match(xhr.headers['Content-Type'], /application\/xml/);
-  assert.match(xhr.body, /<d:propfind/);
-});
-
-test('adds Basic authorization only when a username is configured', () => {
-  const xhr = createMockRequest();
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
-  client.list('https://example.test/dav/', { username: 'user', password: 'pass' }, {});
-  assert.equal(xhr.headers.Authorization, 'Basic dXNlcjpwYXNz');
-});
-
-test('returns parsed entries only for a 207 Multi-Status response', () => {
-  const xhr = createMockRequest();
-  const expected = [{ name: 'Film.mkv', isVideo: true }];
-  let received;
-  const client = new WebDAVClient({
-    createRequest: () => xhr,
-    parse: () => expected
+test('discovers ContentDirectory then sends a SOAP Browse request', () => {
+  const requests = [];
+  const client = new DLNAClient({
+    createRequest() { const xhr = createMockRequest(); requests.push(xhr); return xhr; },
+    parseDevice() { return { controlUrl: 'http://192.168.1.1:8200/ctl/ContentDir', serviceType: 'urn:schemas-upnp-org:service:ContentDirectory:1' }; },
+    parseBrowse() { return { items: [{ name: 'Film.mkv', isVideo: true }] }; }
   });
-  client.list('https://example.test/dav/', {}, { success: items => { received = items; } });
-  xhr.complete(207, '<multistatus/>');
-  assert.equal(received, expected);
+  let received;
+  client.list('192.168.1.1', '8200', '0', { success(items) { received = items; } });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'GET');
+  assert.equal(requests[0].url, 'http://192.168.1.1:8200/rootDesc.xml');
+  requests[0].complete(200, '<root/>');
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].method, 'POST');
+  assert.equal(requests[1].url, 'http://192.168.1.1:8200/ctl/ContentDir');
+  assert.match(requests[1].headers.SOAPAction, /#Browse/);
+  assert.match(requests[1].body, /<ObjectID>0<\/ObjectID>/);
+  requests[1].complete(200, '<Envelope/>');
+  assert.equal(received[0].name, 'Film.mkv');
 });
 
-test('reports unexpected HTTP status once', () => {
+test('reports HTTP failures once', () => {
   const xhr = createMockRequest();
+  const client = new DLNAClient({ createRequest: () => xhr });
   let failure;
-  let calls = 0;
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
-  client.list('https://example.test/dav/', {}, { error: error => { failure = error; calls++; } });
-  xhr.complete(401);
-  xhr.onreadystatechange();
-  assert.equal(failure.status, 401);
-  assert.match(failure.message, /HTTP 401/);
-  assert.equal(calls, 1);
+  client.list('192.168.1.1', 8200, '0', { error(error) { failure = error; } });
+  xhr.complete(403);
+  assert.equal(failure.status, 403);
+  assert.match(failure.message, /HTTP 403/);
 });
 
-test('reports browser network and CORS failures', () => {
+test('aborts an in-flight discovery request', () => {
   const xhr = createMockRequest();
-  let failure;
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
-  client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
-  xhr.onerror();
-  assert.match(failure.message, /CORS or TLS/);
-});
-
-test('allows an in-flight request to be aborted', () => {
-  const xhr = createMockRequest();
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
-  const request = client.list('https://example.test/dav/', {}, {});
+  const client = new DLNAClient({ createRequest: () => xhr });
+  const request = client.list('192.168.1.1', 8200, '0', {});
   request.abort();
   assert.equal(xhr.aborted, true);
 });
