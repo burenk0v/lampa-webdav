@@ -17,29 +17,14 @@
         }
     }
 
-    function parentUrl(currentUrl, rootUrl) {
-        var current = new URL(currentUrl);
-        var root = new URL(rootUrl);
-        var path = current.pathname.replace(/\/$/, '');
-        var rootPath = root.pathname.replace(/\/$/, '');
-        if (current.origin !== root.origin || path === rootPath || path.length <= rootPath.length) return '';
-        var slash = path.lastIndexOf('/');
-        var parentPath = path.substring(0, slash + 1);
-        if (parentPath.length < root.pathname.length) return root.toString();
-        current.pathname = parentPath;
-        current.search = '';
-        current.hash = '';
-        return current.toString();
-    }
-
     function BrowserComponent(object) {
         object = object || {};
         var self = this;
         var root = $('<div class="lampa-dlna"></div>');
         var request = null;
         var destroyed = false;
-        var baseUrl = '';
         var currentId = object.dlnaObjectId || '0';
+        var currentParentId = object.dlnaParentId || '';
 
         function message(text) {
             root.append($('<div class="lampa-dlna__message"></div>').text(text));
@@ -63,13 +48,14 @@
             root.append(connect);
         }
 
-        function openFolder(objectId, title) {
+        function openFolder(objectId, title, parentId) {
             window.Lampa.Activity.push({
                 url: '',
                 title: title,
                 component: COMPONENT_ID,
                 page: 1,
-                dlnaObjectId: url
+                dlnaObjectId: objectId,
+                dlnaParentId: parentId || ''
             });
         }
 
@@ -90,7 +76,7 @@
             var meta = $('<div class="lampa-dlna__meta"></div>').text(item.isDirectory ? 'Папка' : 'Видео');
             row.append(label).append(meta);
             row.on('hover:enter', function () {
-                if (item.isDirectory) openFolder(item.id, item.name);
+                if (item.isDirectory) openFolder(item.id, item.name, item.parentId);
                 else playFile(item);
             });
             root.append(row);
@@ -115,12 +101,12 @@
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
                         renderSettings();
-                        var up = items.length ? items[0].parentId : (currentId === '0' ? '' : '0');
+                        var up = currentParentId;
                         if (up) {
                             var back = $('<div class="selector lampa-dlna__item"></div>');
                             back.append($('<div class="lampa-dlna__name"></div>').text('..  Вверх'));
                             back.on('hover:enter', function () {
-                                openFolder(up, 'DLNA');
+                                openFolder(up, 'DLNA', '');
                             });
                             root.append(back);
                         }
@@ -257,10 +243,9 @@
                     type: 'input',
                     values: '',
                     placeholder: item.placeholder,
-                    default: ''
+                    default: item.name === KEYS.port ? '8200' : ''
                 },
-                field: { name: item.label },
-                
+                field: { name: item.label }
             });
         });
     }
