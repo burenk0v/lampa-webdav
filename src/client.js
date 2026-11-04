@@ -1,214 +1,85 @@
 (function (root, factory) {
     'use strict';
-    var api = factory(root);
+    var api = factory();
     if (typeof module === 'object' && module.exports) module.exports = api;
-    if (root) root.LampaDLNAClient = api;
-}(typeof window !== 'undefined' ? window : this, function (root) {
+    if (root) root.LampaWebDAVClient = api;
+}(typeof window !== 'undefined' ? window : this, function () {
     'use strict';
 
-    function escapeXml(value) {
-        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    var BODY = '<?xml version="1.0" encoding="utf-8"?>' +
+        '<d:propfind xmlns:d="DAV:"><d:prop>' +
+        '<d:resourcetype/><d:displayname/><d:getcontentlength/><d:getlastmodified/>' +
+        '</d:prop></d:propfind>';
+
+    function encodeCredentials(username, password) {
+        var value = String(username || '') + ':' + String(password || '');
+        var binary = unescape(encodeURIComponent(value));
+        if (typeof btoa === 'function') return 'Basic ' + btoa(binary);
+        if (typeof Buffer !== 'undefined') return 'Basic ' + Buffer.from(value, 'utf8').toString('base64');
+        throw new Error('Base64 encoding is unavailable');
     }
 
-    function DLNAClient(options) {
+    function WebDAVClient(options) {
         options = options || {};
-        this.createRequest = options.createRequest || function () { return new XMLHttpRequest(); };
-        this.parseDevice = options.parseDevice || function (xml, url) {
-            return root.LampaDLNACore.parseDeviceDescription(xml, url);
+        this.createRequest = options.createRequest || function () {
+            return new XMLHttpRequest();
         };
-        this.parseBrowse = options.parseBrowse || function (xml, url) {
-            return root.LampaDLNACore.parseBrowseResponse(xml, url);
+        this.parse = options.parse || function (xml, url) {
+            if (!root.LampaWebDAVCore) throw new Error('WebDAV parser is not loaded');
+            return root.LampaWebDAVCore.parseMultistatus(xml, url);
         };
-        this.onLog = typeof options.onLog === 'function' ? options.onLog : function () {};
-        this.fetch = typeof options.fetch === 'function' ? options.fetch : (root && typeof root.fetch === 'function' ? function (url) { return root.fetch(url); } : null);
-        this.fetchTimeoutMs = options.fetchTimeoutMs || 8000;
-        this.setTimeout = options.setTimeout || (root && typeof root.setTimeout === 'function' ? function (callback, delay) { return root.setTimeout(callback, delay); } : setTimeout);
-        this.clearTimeout = options.clearTimeout || (root && typeof root.clearTimeout === 'function' ? function (timer) { return root.clearTimeout(timer); } : clearTimeout);
     }
 
-    DLNAClient.prototype.list = function (address, port, objectId, callbacks) {
+    WebDAVClient.prototype.list = function (url, credentials, callbacks) {
         callbacks = callbacks || {};
-        var self = this;
+        var xhr = this.createRequest();
         var completed = false;
-        var active = null;
-        var baseUrl;
-        var service;
 
-        function log(event, details) {
-            try { self.onLog({time:new Date().toISOString(), event:event, details:details || {}}); } catch (ignore) {}
-        }
-
-        function preview(value, limit) {
-            value = String(value == null ? '' : value);
-            return value.length > limit ? value.slice(0, limit) + '\n...[обрезано, всего ' + value.length + ' символов]' : value;
-        }
-
-        function probeDescription(url) {
-            if (!self.fetch) {
-                log('FETCH GET НЕДОСТУПЕН', {url:url, reason:'fetch API не поддерживается браузером'});
-                return;
-            }
-            var started = Date.now();
-            var settled = false;
-            var timer = null;
-            function clearProbeTimer() {
-                if (timer !== null) {
-                    self.clearTimeout(timer);
-                    timer = null;
-                }
-            }
-            log('FETCH GET СТАРТ', {method:'GET', url:url, headers:'без дополнительных заголовков', timeoutMs:self.fetchTimeoutMs});
-            timer = self.setTimeout(function () {
-                if (settled) return;
-                settled = true;
-                log('FETCH GET ТАЙМ-АУТ', {
-                    url:url,
-                    timeoutMs:self.fetchTimeoutMs,
-                    durationMs:Date.now() - started,
-                    note:'Fetch не завершился за отведённое время; это не доказывает CORS-блокировку.'
-                });
-            }, self.fetchTimeoutMs);
-            try {
-                self.fetch(url).then(function (response) {
-                    if (settled) return;
-                    var responseHeaders = {};
-                    try {
-                        if (response.headers && response.headers.forEach) {
-                            response.headers.forEach(function (value, name) { responseHeaders[name] = value; });
-                        }
-                    } catch (ignoreHeaders) {}
-                    log('FETCH GET ОТВЕТ', {
-                        status:response.status,
-                        ok:response.ok,
-                        type:response.type || '',
-                        durationMs:Date.now() - started,
-                        corsReadSucceeded:true,
-                        headers:responseHeaders,
-                        headersNote:'Показаны только доступные JavaScript заголовки; Access-Control-Allow-Origin может быть скрыт браузером.'
-                    });
-                    return response.text().then(function (body) {
-                        if (settled) return;
-                        settled = true;
-                        clearProbeTimer();
-                        log('FETCH GET ТЕЛО', {length:body.length, preview:preview(body, 4000)});
-                    });
-                }).catch(function (error) {
-                    if (settled) return;
-                    settled = true;
-                    clearProbeTimer();
-                    log('FETCH GET ОШИБКА', {
-                        name:error && error.name || '',
-                        message:error && error.message || String(error),
-                        durationMs:Date.now() - started,
-                        note:'Браузер не дал прочитать ответ; возможна CORS-блокировка или сетевая ошибка.'
-                    });
-                });
-            } catch (error) {
-                if (!settled) {
-                    settled = true;
-                    clearProbeTimer();
-                    log('FETCH GET ОШИБКА', {
-                        name:error.name || '',
-                        message:error.message || String(error),
-                        durationMs:Date.now() - started
-                    });
-                }
-            }
-        }
-
-        function fail(stage, message, status) {
+        function fail(message, status) {
             if (completed) return;
             completed = true;
-            log('ОШИБКА', {stage:stage, message:message, status:status || 0});
-            if (callbacks.error) callbacks.error({
-                stage: stage,
-                message: stage + ': ' + message,
-                status: status || 0
-            });
-        }
-
-        function request(stage, method, url, body, headers, done) {
-            var xhr = self.createRequest();
-            var started = Date.now();
-            var seen = {};
-            active = xhr;
-            log('ПОДГОТОВКА ЗАПРОСА', {stage:stage, method:method, url:url, headers:headers || {}, body:body ? preview(body, 12000) : null});
-            try {
-                xhr.open(method, url, true);
-                log('XHR OPEN', {stage:stage, method:method, url:url});
-                xhr.timeout = 20000;
-                Object.keys(headers || {}).forEach(function (name) {
-                    xhr.setRequestHeader(name, headers[name]);
-                    log('ЗАГОЛОВОК ЗАПРОСА', {stage:stage, name:name, value:headers[name]});
-                });
-                xhr.onreadystatechange = function () {
-                    if (seen[xhr.readyState]) return;
-                    seen[xhr.readyState] = true;
-                    log('XHR READY STATE', {stage:stage, readyState:xhr.readyState, status:xhr.status || 0});
-                    if (xhr.readyState !== 4 || completed) return;
-                    var text = '', responseHeaders = '';
-                    try { text = xhr.responseText || ''; } catch (ignoreText) {}
-                    try { responseHeaders = xhr.getAllResponseHeaders ? xhr.getAllResponseHeaders() : ''; } catch (ignoreHeaders) {}
-                    log('HTTP ОТВЕТ', {stage:stage, status:xhr.status || 0, statusText:xhr.statusText || '', durationMs:Date.now()-started, responseHeaders:responseHeaders || '(недоступны или пусты)', responseText:preview(text,16000)});
-                    if (xhr.status < 200 || xhr.status >= 300) { fail(stage, 'сервер вернул HTTP ' + xhr.status, xhr.status); return; }
-                    try { log('ОБРАБОТКА ОТВЕТА', {stage:stage, responseLength:text.length}); done(text); }
-                    catch (error) { log('ОШИБКА ОБРАБОТКИ', {stage:stage, name:error.name || '', message:error.message || String(error)}); fail(stage, error.message || 'не удалось обработать ответ'); }
-                };
-                xhr.onerror = function () {
-                    log('XHR ERROR', {stage:stage, method:method, url:url, status:xhr.status || 0, durationMs:Date.now()-started, preflightLikely:method === 'POST', note:method === 'POST' ? 'Для SOAP POST браузер может выполнять скрытый CORS OPTIONS preflight из-за Content-Type и SOAPAction; JavaScript не может прочитать его ответ напрямую.' : 'Браузер не предоставил детали ошибки; возможны CORS или недоступность сервера.'});
-                    fail(stage, 'браузер не смог прочитать ответ. Возможны CORS, блокировка HTTP/HTTPS или недоступность сервера.');
-                };
-                xhr.ontimeout = function () { log('XHR TIMEOUT', {stage:stage, timeoutMs:xhr.timeout, durationMs:Date.now()-started}); fail(stage, 'истекло время ожидания ответа'); };
-                xhr.onabort = function () { log('XHR ABORT', {stage:stage}); if (!completed) fail(stage, 'запрос был прерван'); };
-                log('XHR SEND', {stage:stage, bodyLength:body ? body.length : 0});
-                xhr.send(body || null);
-            } catch (error) {
-                log('ИСКЛЮЧЕНИЕ XHR', {stage:stage, name:error.name || '', message:error.message || String(error)});
-                fail(stage, error.message || 'не удалось отправить запрос');
-            }
+            if (callbacks.error) callbacks.error({ message: message, status: status || 0 });
         }
 
         try {
-            baseUrl = 'http://' + String(address).trim() + ':' + String(port).trim() + '/';
-            log('СТАРТ DLNA', {pageUrl:root.location ? root.location.href : '', pageProtocol:root.location ? root.location.protocol : '', serverUrl:baseUrl, objectId:objectId || '0', userAgent:root.navigator ? root.navigator.userAgent : ''});
-            probeDescription(baseUrl + 'rootDesc.xml');
-            request('Загрузка rootDesc.xml', 'GET', baseUrl + 'rootDesc.xml', null, {}, function (description) {
-                log('ROOT DESCRIPTION ПОЛУЧЕН', {length:description.length, xml:preview(description,16000)});
-                service = self.parseDevice(description, baseUrl);
-                log('CONTENT DIRECTORY НАЙДЕН', {serviceType:service.serviceType, controlUrl:service.controlUrl});
-                var soap = '<?xml version="1.0" encoding="utf-8"?>' +
-                    '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
-                    '<s:Body><u:Browse xmlns:u="' + service.serviceType + '">' +
-                    '<ObjectID>' + escapeXml(objectId || '0') + '</ObjectID>' +
-                    '<BrowseFlag>BrowseDirectChildren</BrowseFlag><Filter>*</Filter>' +
-                    '<StartingIndex>0</StartingIndex><RequestedCount>0</RequestedCount><SortCriteria></SortCriteria>' +
-                    '</u:Browse></s:Body></s:Envelope>';
-                log('SOAP ПОДГОТОВЛЕН', {action:service.serviceType + '#Browse', controlUrl:service.controlUrl, objectId:objectId || '0', xml:preview(soap,12000)});
-                log('CORS PREFLIGHT ОЖИДАЕТСЯ', {method:'OPTIONS', targetMethod:'POST', controlUrl:service.controlUrl, requestHeaders:['Content-Type: text/xml; charset="utf-8"','SOAPAction'], note:'OPTIONS отправляет браузер автоматически перед SOAP POST. Страница не может напрямую прочитать preflight-ответ; при ошибке POST смотрите XHR ERROR и preflightLikely.'});
-                request('SOAP Browse', 'POST', service.controlUrl, soap, {
-                    'Content-Type': 'text/xml; charset="utf-8"',
-                    'SOAPAction': '"' + service.serviceType + '#Browse"'
-                }, function (response) {
-                    log('SOAP ОТВЕТ ПОЛУЧЕН', {length:response.length, xml:preview(response,16000)});
-                    var result = self.parseBrowse(response, baseUrl);
-                    log('DIDL РАЗОБРАН', {itemCount:result.items.length, numberReturned:result.numberReturned, items:result.items.map(function (item) { return {id:item.id,name:item.name,isDirectory:item.isDirectory,isVideo:item.isVideo,href:item.href,size:item.size}; })});
+            xhr.open('PROPFIND', url, true);
+            xhr.timeout = 20000;
+            xhr.setRequestHeader('Depth', '1');
+            xhr.setRequestHeader('Content-Type', 'application/xml; charset=utf-8');
+            if (credentials && credentials.username) {
+                xhr.setRequestHeader('Authorization', encodeCredentials(credentials.username, credentials.password));
+            }
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== 4 || completed) return;
+                if (xhr.status !== 207) {
+                    fail(xhr.status ? 'WebDAV server returned HTTP ' + xhr.status : 'WebDAV request failed. Check CORS, TLS certificate and network access.', xhr.status);
+                    return;
+                }
+                try {
+                    var items = this.parse(xhr.responseText, url);
                     completed = true;
-                    log('DLNA ЗАВЕРШЕНО', {itemCount:result.items.length});
-                    if (callbacks.success) callbacks.success(result.items);
-                });
-            });
+                    if (callbacks.success) callbacks.success(items);
+                } catch (error) {
+                    fail(error.message || 'Could not parse WebDAV response', xhr.status);
+                }
+            }.bind(this);
+            xhr.onerror = function () {
+                fail('Network error. The TV browser may have blocked the WebDAV request because of CORS or TLS.');
+            };
+            xhr.ontimeout = function () {
+                fail('WebDAV request timed out');
+            };
+            xhr.send(BODY);
         } catch (error) {
-            log('ОШИБКА ПОДГОТОВКИ', {name:error.name || '', message:error.message || String(error)});
-            fail('Подготовка DLNA-запроса', error.message || 'не удалось начать запрос');
+            fail(error.message || 'Could not start WebDAV request');
         }
         return {
             abort: function () {
-                if (completed) return;
+                if (!completed && xhr.abort) xhr.abort();
                 completed = true;
-                if (active && active.abort) active.abort();
             }
         };
     };
 
-    return { DLNAClient: DLNAClient };
+    return { WebDAVClient: WebDAVClient, propfindBody: BODY };
 }));
