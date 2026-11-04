@@ -24,6 +24,7 @@
         var request = null;
         var destroyed = false;
         var currentId = object.dlnaObjectId || '0';
+        var history = object.dlnaHistory || [];
         var currentParentId = object.dlnaParentId || '';
 
         function message(text) {
@@ -40,6 +41,7 @@
                     window.LampaDLNACore.normalizeAddress(setting(KEYS.address));
                     window.LampaDLNACore.normalizePort(setting(KEYS.port));
                     currentId = '0';
+                    history = [];
                     load();
                 } catch (error) {
                     notify('Укажите адрес и порт DLNA в настройках Lampa');
@@ -48,14 +50,14 @@
             root.append(connect);
         }
 
-        function openFolder(objectId, title, parentId) {
+        function openFolder(objectId, title, nextHistory) {
             window.Lampa.Activity.push({
                 url: '',
                 title: title,
                 component: COMPONENT_ID,
                 page: 1,
                 dlnaObjectId: objectId,
-                dlnaParentId: parentId || ''
+                dlnaHistory: nextHistory || []
             });
         }
 
@@ -76,7 +78,7 @@
             var meta = $('<div class="lampa-dlna__meta"></div>').text(item.isDirectory ? 'Папка' : 'Видео');
             row.append(label).append(meta);
             row.on('hover:enter', function () {
-                if (item.isDirectory) openFolder(item.id, item.name, item.parentId);
+                if (item.isDirectory) openFolder(item.id, item.name, history.concat([currentId]));
                 else playFile(item);
             });
             root.append(row);
@@ -101,12 +103,12 @@
                         if (self.activity && self.activity.loader) self.activity.loader(false);
                         root.empty();
                         renderSettings();
-                        var up = currentParentId;
+                        var up = history.length ? history[history.length - 1] : '';
                         if (up) {
                             var back = $('<div class="selector lampa-dlna__item"></div>');
                             back.append($('<div class="lampa-dlna__name"></div>').text('..  Вверх'));
                             back.on('hover:enter', function () {
-                                openFolder(up, 'DLNA', '');
+                                openFolder(up, 'DLNA', history.slice(0, -1));
                             });
                             root.append(back);
                         }
