@@ -60,7 +60,9 @@
                         ok:response.ok,
                         type:response.type || '',
                         durationMs:Date.now() - started,
-                        headers:responseHeaders
+                        corsReadSucceeded:true,
+                        headers:responseHeaders,
+                        headersNote:'Показаны только доступные JavaScript заголовки; Access-Control-Allow-Origin может быть скрыт браузером.'
                     });
                     return response.text().then(function (body) {
                         log('FETCH GET ТЕЛО', {length:body.length, preview:preview(body, 4000)});
