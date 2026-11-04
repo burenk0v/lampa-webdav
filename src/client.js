@@ -7,7 +7,7 @@
     'use strict';
 
     function escapeXml(value) {
-        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\\"/g, '&quot;').replace(/'/g, '&apos;');
+        return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
     }
 
     function DLNAClient(options) {
@@ -100,8 +100,9 @@
         }
         return {
             abort: function () {
-                if (!completed && active && active.abort) active.abort();
+                if (completed) return;
                 completed = true;
+                if (active && active.abort) active.abort();
             }
         };
     };
