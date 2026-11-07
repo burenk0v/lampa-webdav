@@ -176,7 +176,7 @@
                 try { responseHeaders = xhr.getAllResponseHeaders ? xhr.getAllResponseHeaders() : ''; } catch (ignore) {}
                 log.call(this, 'HTTP ОТВЕТ', { status: xhr.status || 0, statusText: xhr.statusText || '', durationMs: Date.now() - started, headers: responseHeaders || '(unavailable)', bodyPreview: String(xhr.responseText || '').slice(0, 1500) });
                 if (xhr.status !== 207) {
-                    fail(xhr.status ? 'WebDAV server returned HTTP ' + xhr.status : 'WebDAV request failed. Check CORS, TLS certificate and network access.', xhr.status);
+                    fail.call(this, xhr.status ? 'WebDAV server returned HTTP ' + xhr.status : 'WebDAV request failed. Check CORS, TLS certificate and network access.', xhr.status, 'http-status');
                     return;
                 }
                 try {
@@ -185,17 +185,17 @@
                     log.call(this, 'WEBDAV ОТВЕТ РАЗОБРАН', { itemCount: items.length, durationMs: Date.now() - started });
                     if (callbacks.success) callbacks.success(items);
                 } catch (error) {
-                    fail(error.message || 'Could not parse WebDAV response', xhr.status);
+                    fail.call(this, error.message || 'Could not parse WebDAV response', xhr.status, 'xml-parse');
                 }
             }.bind(this);
             xhr.onerror = function () {
                 log.call(this, 'XHR ERROR', { status: xhr.status || 0, readyState: xhr.readyState, durationMs: Date.now() - started, pageProtocol: pageProtocol, url: url, possibleCauses: ['CORS / OPTIONS preflight', 'TLS certificate or hostname validation', 'network/server unavailable'], note: 'При CORS/TLS-блокировке браузер может не раскрыть HTTP-статус и заголовки.' });
                 fail.call(this, 'Network error. Check CORS/OPTIONS, TLS certificate and network access.', 0, 'network-cors-or-tls');
-            };
+            }.bind(this);
             xhr.ontimeout = function () {
                 log.call(this, 'XHR TIMEOUT', { timeoutMs: xhr.timeout, durationMs: Date.now() - started });
                 fail.call(this, 'WebDAV request timed out', 0, 'timeout');
-            };
+            }.bind(this);
             log.call(this, 'ЗАГОЛОВКИ ЗАПРОСА', {
                 Depth: '1', 'Content-Type': 'application/xml; charset=utf-8',
                 Authorization: credentials && credentials.username ? '(configured; hidden)' : '(not configured)',
@@ -204,7 +204,7 @@
             log.call(this, 'XHR SEND', { method: 'PROPFIND', url: url, bodyLength: BODY.length });
             xhr.send(BODY);
         } catch (error) {
-            fail(error.message || 'Could not start WebDAV request');
+            fail.call(this, error.message || 'Could not start WebDAV request', 0, 'exception');
         }
         return {
             abort: function () {
