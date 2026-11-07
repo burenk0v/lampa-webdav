@@ -82,3 +82,34 @@ test('allows an in-flight request to be aborted', () => {
   request.abort();
   assert.equal(xhr.aborted, true);
 });
+
+
+test('logs WebDAV request stages without exposing authorization credentials', () => {
+  const xhr = createMockRequest();
+  const logs = [];
+  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [], onLog: entry => logs.push(entry) });
+  client.list('https://example.test/dav/', { username: 'user', password: 'secret' }, {});
+  xhr.complete(207, '<multistatus/>');
+  const events = logs.map(entry => entry.event);
+  assert.ok(events.includes('СТАРТ WEBDAV'));
+  assert.ok(events.includes('XHR OPEN'));
+  assert.ok(events.includes('ЗАГОЛОВКИ ЗАПРОСА'));
+  assert.ok(events.includes('XHR SEND'));
+  assert.ok(events.includes('HTTP ОТВЕТ'));
+  assert.ok(events.includes('WEBDAV ОТВЕТ РАЗОБРАН'));
+  const headers = logs.find(entry => entry.event === 'ЗАГОЛОВКИ ЗАПРОСА');
+  assert.equal(headers.details.Authorization, '(configured; hidden)');
+  assert.equal(JSON.stringify(logs).includes('secret'), false);
+});
+
+test('logs network failures with CORS and TLS as possible causes', () => {
+  const xhr = createMockRequest();
+  const logs = [];
+  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [], onLog: entry => logs.push(entry) });
+  client.list('https://example.test/dav/', {}, {});
+  xhr.onerror();
+  const failure = logs.find(entry => entry.event === 'XHR ERROR');
+  assert.ok(failure);
+  assert.ok(failure.details.possibleCauses.includes('CORS / OPTIONS preflight'));
+  assert.ok(failure.details.possibleCauses.includes('TLS certificate or hostname validation'));
+});
