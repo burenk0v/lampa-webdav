@@ -51,9 +51,22 @@
         var destroyed = false;
         var baseUrl = '';
         var currentUrl = object.webdavUrl || '';
+        var diagnosticLines = [];
 
         function message(text) {
             root.append($('<div class="lampa-webdav__message"></div>').text(text));
+        }
+
+        function diagnostic(entry) {
+            var line = entry.time + ' | ' + entry.event + ' | ' + JSON.stringify(entry.details || {});
+            diagnosticLines.push(line);
+            if (diagnosticLines.length > 40) diagnosticLines.shift();
+        }
+
+        function renderDiagnostics() {
+            var box = $('<div class="lampa-webdav__message lampa-webdav__diagnostics"></div>');
+            box.text(diagnosticLines.length ? diagnosticLines.join('\n') : 'Диагностика появится после подключения.');
+            root.append(box);
         }
 
         function renderSettings() {
@@ -121,7 +134,8 @@
             }
             if (request && request.abort) request.abort();
             if (self.activity && self.activity.loader) self.activity.loader(true);
-            request = new window.LampaWebDAVClient.WebDAVClient().list(
+            diagnosticLines = [];
+            request = new window.LampaWebDAVClient.WebDAVClient({ onLog: diagnostic }).list(
                 currentUrl,
                 auth,
                 {
@@ -151,9 +165,13 @@
                         root.empty();
                         renderSettings();
                         message(error.message || 'Не удалось открыть WebDAV каталог');
-                        if (!error.status) {
-                            message('Проверьте CORS для PROPFIND и заголовка Depth, TLS-сертификат и доступность сервера.');
+                        if (error.status === 401) message('HTTP 401: проверьте логин и пароль.');
+                        else if (error.status === 403) message('HTTP 403: сервер запретил доступ. Проверим права, путь и правила reverse proxy.');
+                        else if (!error.status) message('Нет доступного HTTP-ответа: возможны CORS/OPTIONS, TLS-сертификат или сетевая ошибка.');
+                        if (error.requestUrl && error.pageProtocol) {
+                            message('Страница: ' + error.pageProtocol + ' | WebDAV: ' + (error.requestUrl.indexOf('https:') === 0 ? 'HTTPS' : 'HTTP'));
                         }
+                        renderDiagnostics();
                         notify(error.message || 'Ошибка WebDAV');
                     }
                 }
