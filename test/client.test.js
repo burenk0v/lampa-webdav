@@ -72,7 +72,7 @@ test('reports browser network and CORS failures', () => {
   const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
   client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
   xhr.onerror();
-  assert.match(failure.message, /CORS or TLS/);
+  assert.match(failure.message, /CORS\/OPTIONS.*TLS certificate/);
 });
 
 test('allows an in-flight request to be aborted', () => {
