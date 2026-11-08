@@ -126,3 +126,26 @@ test('classifies readyState 4 with status 0 as a network failure, not HTTP statu
   assert.match(failure.message, /No HTTP response/);
   assert.ok(logs.some(entry => entry.event === 'XHR ERROR'));
 });
+
+test('runs a plain GET probe after PROPFIND network failure and classifies readable GET', () => {
+  const main = createMockRequest();
+  const probe = createMockRequest();
+  const requests = [main, probe];
+  const logs = [];
+  let failure;
+  const client = new WebDAVClient({
+    createRequest: () => requests.shift(),
+    parse: () => [],
+    onLog: entry => logs.push(entry)
+  });
+  client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
+  main.onerror();
+  assert.equal(probe.method, 'GET');
+  assert.equal(probe.headers.Authorization, undefined);
+  assert.equal(probe.headers.Depth, undefined);
+  probe.complete(401, 'Unauthorized');
+  const result = logs.find(entry => entry.event === 'CORS GET PROBE RESULT');
+  assert.equal(result.details.status, 401);
+  assert.match(result.details.interpretation, /PROPFIND OPTIONS preflight/);
+  assert.equal(failure.reason, 'network-cors-or-tls');
+});
