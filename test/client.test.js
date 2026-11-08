@@ -113,3 +113,16 @@ test('logs network failures with CORS and TLS as possible causes', () => {
   assert.ok(failure.details.possibleCauses.includes('CORS / OPTIONS preflight'));
   assert.ok(failure.details.possibleCauses.includes('TLS certificate or hostname validation'));
 });
+
+
+test('classifies readyState 4 with status 0 as a network failure, not HTTP status', () => {
+  const xhr = createMockRequest();
+  let failure;
+  const logs = [];
+  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [], onLog: entry => logs.push(entry) });
+  client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
+  xhr.complete(0);
+  assert.equal(failure.reason, 'network-cors-or-tls');
+  assert.match(failure.message, /No HTTP response/);
+  assert.ok(logs.some(entry => entry.event === 'XHR ERROR'));
+});
