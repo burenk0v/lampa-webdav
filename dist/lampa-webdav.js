@@ -175,8 +175,13 @@
                 var responseHeaders = '';
                 try { responseHeaders = xhr.getAllResponseHeaders ? xhr.getAllResponseHeaders() : ''; } catch (ignore) {}
                 log.call(this, 'HTTP ОТВЕТ', { status: xhr.status || 0, statusText: xhr.statusText || '', durationMs: Date.now() - started, headers: responseHeaders || '(unavailable)', bodyPreview: String(xhr.responseText || '').slice(0, 1500) });
+                if (xhr.status === 0) {
+                    log.call(this, 'XHR ERROR', { status: 0, readyState: xhr.readyState, durationMs: Date.now() - started, pageProtocol: pageProtocol, url: url, possibleCauses: ['CORS / OPTIONS preflight', 'TLS certificate or hostname validation', 'network/server unavailable'], note: 'Браузер не предоставил HTTP-статус; это не HTTP-ответ сервера.' });
+                    fail.call(this, 'No HTTP response. Check CORS/OPTIONS, TLS certificate and network access.', 0, 'network-cors-or-tls');
+                    return;
+                }
                 if (xhr.status !== 207) {
-                    fail.call(this, xhr.status ? 'WebDAV server returned HTTP ' + xhr.status : 'WebDAV request failed. Check CORS, TLS certificate and network access.', xhr.status, 'http-status');
+                    fail.call(this, 'WebDAV server returned HTTP ' + xhr.status, xhr.status, 'http-status');
                     return;
                 }
                 try {
