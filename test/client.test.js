@@ -66,13 +66,16 @@ test('reports unexpected HTTP status once', () => {
   assert.equal(calls, 1);
 });
 
-test('reports browser network and CORS failures', () => {
-  const xhr = createMockRequest();
+test('reports browser network and CORS failures after a plain GET probe', () => {
+  const main = createMockRequest();
+  const probe = createMockRequest();
+  const requests = [main, probe];
   let failure;
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [] });
+  const client = new WebDAVClient({ createRequest: () => requests.shift(), parse: () => [] });
   client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
-  xhr.onerror();
-  assert.match(failure.message, /CORS\/OPTIONS.*TLS certificate/);
+  main.onerror();
+  probe.complete(401, 'Unauthorized');
+  assert.match(failure.message, /CORS GET probe result/);
 });
 
 test('allows an in-flight request to be aborted', () => {
@@ -84,45 +87,62 @@ test('allows an in-flight request to be aborted', () => {
 });
 
 
-test('logs WebDAV request stages without exposing authorization credentials', () => {
+test('keeps successful WebDAV requests out of the diagnostic log', () => {
   const xhr = createMockRequest();
   const logs = [];
   const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [], onLog: entry => logs.push(entry) });
   client.list('https://example.test/dav/', { username: 'user', password: 'secret' }, {});
   xhr.complete(207, '<multistatus/>');
-  const events = logs.map(entry => entry.event);
-  assert.ok(events.includes('СТАРТ WEBDAV'));
-  assert.ok(events.includes('XHR OPEN'));
-  assert.ok(events.includes('ЗАГОЛОВКИ ЗАПРОСА'));
-  assert.ok(events.includes('XHR SEND'));
-  assert.ok(events.includes('HTTP ОТВЕТ'));
-  assert.ok(events.includes('WEBDAV ОТВЕТ РАЗОБРАН'));
-  const headers = logs.find(entry => entry.event === 'ЗАГОЛОВКИ ЗАПРОСА');
-  assert.equal(headers.details.Authorization, '(configured; hidden)');
-  assert.equal(JSON.stringify(logs).includes('secret'), false);
+  assert.deepEqual(logs, []);
 });
 
-test('logs network failures with CORS and TLS as possible causes', () => {
-  const xhr = createMockRequest();
+test('logs network failures and starts the plain GET CORS probe', () => {
+  const main = createMockRequest();
+  const probe = createMockRequest();
+  const requests = [main, probe];
   const logs = [];
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [], onLog: entry => logs.push(entry) });
+  const client = new WebDAVClient({ createRequest: () => requests.shift(), parse: () => [], onLog: entry => logs.push(entry) });
   client.list('https://example.test/dav/', {}, {});
-  xhr.onerror();
-  const failure = logs.find(entry => entry.event === 'XHR ERROR');
-  assert.ok(failure);
-  assert.ok(failure.details.possibleCauses.includes('CORS / OPTIONS preflight'));
-  assert.ok(failure.details.possibleCauses.includes('TLS certificate or hostname validation'));
+  main.onerror();
+  assert.equal(logs.length, 0);
 });
 
 
 test('classifies readyState 4 with status 0 as a network failure, not HTTP status', () => {
   const xhr = createMockRequest();
+  const probe = createMockRequest();
+  const requests = [xhr, probe];
   let failure;
   const logs = [];
-  const client = new WebDAVClient({ createRequest: () => xhr, parse: () => [], onLog: entry => logs.push(entry) });
+  const client = new WebDAVClient({ createRequest: () => requests.shift(), parse: () => [], onLog: entry => logs.push(entry) });
   client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
   xhr.complete(0);
+  probe.complete(401, 'Unauthorized');
   assert.equal(failure.reason, 'network-cors-or-tls');
-  assert.match(failure.message, /No HTTP response/);
-  assert.ok(logs.some(entry => entry.event === 'XHR ERROR'));
+  assert.match(failure.message, /CORS GET probe result/);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].event, 'CORS GET PROBE RESULT');
+});
+
+test('runs a plain GET probe after PROPFIND network failure and classifies readable GET', () => {
+  const main = createMockRequest();
+  const probe = createMockRequest();
+  const requests = [main, probe];
+  const logs = [];
+  let failure;
+  const client = new WebDAVClient({
+    createRequest: () => requests.shift(),
+    parse: () => [],
+    onLog: entry => logs.push(entry)
+  });
+  client.list('https://example.test/dav/', {}, { error: error => { failure = error; } });
+  main.onerror();
+  assert.equal(probe.method, 'GET');
+  assert.equal(probe.headers.Authorization, undefined);
+  assert.equal(probe.headers.Depth, undefined);
+  probe.complete(401, 'Unauthorized');
+  const result = logs.find(entry => entry.event === 'CORS GET PROBE RESULT');
+  assert.equal(result.details.status, 401);
+  assert.match(result.details.interpretation, /PROPFIND OPTIONS preflight/);
+  assert.equal(failure.reason, 'network-cors-or-tls');
 });
