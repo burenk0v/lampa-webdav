@@ -141,14 +141,12 @@
         callbacks = callbacks || {};
         var xhr = this.createRequest();
         var completed = false;
-        var started = Date.now();
         function log(event, details) {
             try { this.onLog({ time: new Date().toISOString(), event: event, details: details || {} }); } catch (ignore) {}
         }
         function fail(message, status, reason) {
             if (completed) return;
             completed = true;
-            log.call(this, 'ОШИБКА', { message: message, status: status || 0, reason: reason || '' });
             if (callbacks.error) callbacks.error({ message: message, status: status || 0, reason: reason || '', requestUrl: url, pageProtocol: (typeof window !== 'undefined' && window.location ? window.location.protocol : '') });
         }
 
@@ -160,10 +158,6 @@
             var probe;
             try {
                 probe = self.createRequest();
-                log.call(self, 'CORS GET PROBE START', {
-                    method: 'GET', url: url,
-                    note: 'Пробный GET без Authorization и пользовательских заголовков. Он проверяет доступность простого cross-origin запроса, но не отправляет OPTIONS вручную.'
-                });
                 probe.open('GET', url, true);
                 probe.timeout = 8000;
                 var probeFinished = false;
@@ -171,7 +165,7 @@
                     if (probeFinished) return;
                     probeFinished = true;
                     log.call(self, 'CORS GET PROBE RESULT', details);
-                    fail.call(self, 'WebDAV request was blocked. See CORS GET PROBE RESULT to distinguish a general CORS block from a PROPFIND/preflight-specific block.', 0, 'network-cors-or-tls');
+                    fail.call(self, 'WebDAV request was blocked. See CORS GET probe result to distinguish a general CORS block from a PROPFIND/preflight-specific block.', 0, 'network-cors-or-tls');
                 }
                 probe.onreadystatechange = function () {
                     if (probe.readyState !== 4 || probeFinished) return;
@@ -195,22 +189,13 @@
                 };
                 probe.send(null);
             } catch (error) {
-                log.call(self, 'CORS GET PROBE ERROR', { message: error.message || String(error) });
+                log.call(self, 'CORS GET PROBE RESULT', { status: 0, error: error.message || String(error), interpretation: 'The simple GET probe could not start; check browser support and network access.' });
                 fail.call(self, 'WebDAV request failed and the CORS GET probe could not start.', 0, 'network-cors-or-tls');
             }
         }
 
-        var pageProtocol = typeof window !== 'undefined' && window.location ? window.location.protocol : '';
-        log.call(this, 'СТАРТ WEBDAV', {
-            pageProtocol: pageProtocol,
-            requestProtocol: String(url).indexOf('https:') === 0 ? 'https:' : 'http:',
-            url: url,
-            method: 'PROPFIND',
-            note: 'HTTP-страница → HTTPS WebDAV допустимо; HTTPS-страница → HTTP может блокироваться как mixed content.'
-        });
         try {
             xhr.open('PROPFIND', url, true);
-            log.call(this, 'XHR OPEN', { method: 'PROPFIND', url: url, durationMs: Date.now() - started });
             xhr.timeout = 20000;
             xhr.setRequestHeader('Depth', '1');
             xhr.setRequestHeader('Content-Type', 'application/xml; charset=utf-8');
@@ -218,13 +203,8 @@
                 xhr.setRequestHeader('Authorization', encodeCredentials(credentials.username, credentials.password));
             }
             xhr.onreadystatechange = function () {
-                log.call(this, 'XHR READY STATE', { readyState: xhr.readyState, status: xhr.status || 0, durationMs: Date.now() - started });
                 if (xhr.readyState !== 4 || completed) return;
-                var responseHeaders = '';
-                try { responseHeaders = xhr.getAllResponseHeaders ? xhr.getAllResponseHeaders() : ''; } catch (ignore) {}
-                log.call(this, 'HTTP ОТВЕТ', { status: xhr.status || 0, statusText: xhr.statusText || '', durationMs: Date.now() - started, headers: responseHeaders || '(unavailable)', bodyPreview: String(xhr.responseText || '').slice(0, 1500) });
                 if (xhr.status === 0) {
-                    log.call(this, 'XHR ERROR', { status: 0, readyState: xhr.readyState, durationMs: Date.now() - started, pageProtocol: pageProtocol, url: url, possibleCauses: ['CORS / OPTIONS preflight', 'TLS certificate or hostname validation', 'network/server unavailable'], note: 'Браузер не предоставил HTTP-статус; это не HTTP-ответ сервера.' });
                     runSimpleGetProbe();
                     return;
                 }
@@ -235,26 +215,17 @@
                 try {
                     var items = this.parse(xhr.responseText, url);
                     completed = true;
-                    log.call(this, 'WEBDAV ОТВЕТ РАЗОБРАН', { itemCount: items.length, durationMs: Date.now() - started });
                     if (callbacks.success) callbacks.success(items);
                 } catch (error) {
                     fail.call(this, error.message || 'Could not parse WebDAV response', xhr.status, 'xml-parse');
                 }
             }.bind(this);
             xhr.onerror = function () {
-                log.call(this, 'XHR ERROR', { status: xhr.status || 0, readyState: xhr.readyState, durationMs: Date.now() - started, pageProtocol: pageProtocol, url: url, possibleCauses: ['CORS / OPTIONS preflight', 'TLS certificate or hostname validation', 'network/server unavailable'], note: 'При CORS/TLS-блокировке браузер может не раскрыть HTTP-статус и заголовки.' });
                 runSimpleGetProbe();
             }.bind(this);
             xhr.ontimeout = function () {
-                log.call(this, 'XHR TIMEOUT', { timeoutMs: xhr.timeout, durationMs: Date.now() - started });
                 fail.call(this, 'WebDAV request timed out', 0, 'timeout');
             }.bind(this);
-            log.call(this, 'ЗАГОЛОВКИ ЗАПРОСА', {
-                Depth: '1', 'Content-Type': 'application/xml; charset=utf-8',
-                Authorization: credentials && credentials.username ? '(configured; hidden)' : '(not configured)',
-                note: 'PROPFIND и пользовательские заголовки могут вызвать CORS OPTIONS preflight.'
-            });
-            log.call(this, 'XHR SEND', { method: 'PROPFIND', url: url, bodyLength: BODY.length });
             xhr.send(BODY);
         } catch (error) {
             fail.call(this, error.message || 'Could not start WebDAV request', 0, 'exception');
